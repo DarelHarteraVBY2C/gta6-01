@@ -1,7 +1,7 @@
 // Solmar Bay rendering: the golden-hour city, every car and pedestrian, the
 // particles, and the title, pause and end screens. All drawing is plain Canvas
 // 2D so the game runs anywhere with no assets to download.
-import { clamp, lerp, dist } from './utils.js';
+import { clamp, lerp, dist, shade } from './utils.js';
 import { CITY_WIDTH, CITY_HEIGHT, AVENUES, STREETS, ROAD_HALF } from './city.js';
 import { money, clock } from './utils.js';
 
@@ -22,7 +22,7 @@ export class Camera {
     const lookY = py + vy * 0.22;
     this.x = lerp(this.x, lookX, Math.min(1, dt * 4));
     this.y = lerp(this.y, lookY, Math.min(1, dt * 4));
-    this.targetZoom = inCar ? 0.82 - speedRatio * 0.12 : 1.0;
+    this.targetZoom = inCar ? 0.86 - speedRatio * 0.12 : 1.05;
     this.zoom = lerp(this.zoom, this.targetZoom, Math.min(1, dt * 2));
     const halfW = VIEW_W / 2 / this.zoom;
     const halfH = VIEW_H / 2 / this.zoom;
@@ -52,6 +52,7 @@ export function drawWorld(ctx, game) {
   drawEnemies(ctx, game);
   drawCars(ctx, game);
   drawPlayer(ctx, game);
+  drawHeli(ctx, game);
   drawParticles(ctx, game);
   drawBullets(ctx, game);
   ctx.restore();
@@ -61,17 +62,29 @@ export function drawWorld(ctx, game) {
   grad.addColorStop(1, 'rgba(20,10,0,0.28)');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  // Sun glare from the west (top-left) plus a warm golden-hour grade.
+  // Screen-space, so it warms the whole frame evenly.
+  const glare = ctx.createRadialGradient(0, 0, 0, 0, 0, VIEW_H * 0.95);
+  glare.addColorStop(0, 'rgba(255,205,125,0.20)');
+  glare.addColorStop(0.45, 'rgba(255,185,105,0.06)');
+  glare.addColorStop(1, 'rgba(255,185,105,0)');
+  ctx.fillStyle = glare;
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 }
 
 function drawGround(ctx, game) {
   const city = game.city;
-  // Block base (warm concrete).
-  ctx.fillStyle = '#57503f';
+  // Block base (warm sunlit concrete).
+  ctx.fillStyle = '#6a5e45';
   ctx.fillRect(-400, -400, CITY_WIDTH + 800, CITY_HEIGHT + 800);
-  // Beach sand and sea to the south.
-  ctx.fillStyle = '#d9b77c';
+  // Beach sand and sea to the south; the sea warms toward the horizon.
+  ctx.fillStyle = '#e0bf85';
   ctx.fillRect(-400, city.beach.y, CITY_WIDTH + 800, CITY_HEIGHT - city.beach.y + 400);
-  ctx.fillStyle = '#1d6a8a';
+  const seaGrad = ctx.createLinearGradient(0, city.beach.seaY, 0, city.beach.seaY + 200);
+  seaGrad.addColorStop(0, '#24789f');
+  seaGrad.addColorStop(0.6, '#3d8ab0');
+  seaGrad.addColorStop(1, '#e8956b');
+  ctx.fillStyle = seaGrad;
   ctx.fillRect(-400, city.beach.seaY, CITY_WIDTH + 800, 200);
   ctx.strokeStyle = 'rgba(255,255,255,0.5)';
   ctx.lineWidth = 2;
@@ -83,7 +96,7 @@ function drawGround(ctx, game) {
     ctx.stroke();
   }
   // Park grass and pond.
-  ctx.fillStyle = '#3f7a44';
+  ctx.fillStyle = '#4c8a50';
   ctx.fillRect(city.park.x, city.park.y, city.park.w, city.park.h);
   ctx.fillStyle = '#3d7ea6';
   ctx.beginPath();
@@ -91,15 +104,15 @@ function drawGround(ctx, game) {
   ctx.fill();
   // Roads: dark asphalt with lighter sidewalks.
   for (const a of AVENUES) {
-    ctx.fillStyle = '#8a8071';
+    ctx.fillStyle = '#9c9180';
     ctx.fillRect(-400, a - 70, CITY_WIDTH + 800, 140);
-    ctx.fillStyle = '#2e3138';
+    ctx.fillStyle = '#3a3e46';
     ctx.fillRect(-400, a - ROAD_HALF, CITY_WIDTH + 800, ROAD_HALF * 2);
   }
   for (const s of STREETS) {
-    ctx.fillStyle = '#8a8071';
+    ctx.fillStyle = '#9c9180';
     ctx.fillRect(s - 70, -400, 140, CITY_HEIGHT + 800);
-    ctx.fillStyle = '#2e3138';
+    ctx.fillStyle = '#3a3e46';
     ctx.fillRect(s - ROAD_HALF, -400, ROAD_HALF * 2, CITY_HEIGHT + 800);
   }
   // Centre dashes on every road.
@@ -128,9 +141,27 @@ function drawGround(ctx, game) {
 
 function drawBuildings(ctx, game) {
   for (const b of game.city.buildings) {
-    // Long golden-hour shadow.
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    ctx.fillRect(b.x + 10, b.y + 12, b.w, b.h);
+    // Long golden-hour shadow, cast to the north-east by the low western sun.
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.fillRect(b.x + 18, b.y + 14, b.w, b.h);
+    // Extruded side facades (2.5D): the south wall and east wall of the
+    // building, darker shades of its own color, so the roof reads as raised.
+    ctx.fillStyle = shade(b.color, 0.55);
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y + b.h);
+    ctx.lineTo(b.x + b.w, b.y + b.h);
+    ctx.lineTo(b.x + b.w + 10, b.y + b.h + 12);
+    ctx.lineTo(b.x + 10, b.y + b.h + 12);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = shade(b.color, 0.7);
+    ctx.beginPath();
+    ctx.moveTo(b.x + b.w, b.y);
+    ctx.lineTo(b.x + b.w, b.y + b.h);
+    ctx.lineTo(b.x + b.w + 10, b.y + b.h + 12);
+    ctx.lineTo(b.x + b.w + 10, b.y + 12);
+    ctx.closePath();
+    ctx.fill();
     // Body.
     ctx.fillStyle = b.color;
     ctx.fillRect(b.x, b.y, b.w, b.h);
@@ -145,6 +176,14 @@ function drawBuildings(ctx, game) {
       for (let wx = b.x + 12; wx < b.x + b.w - 10; wx += 18) {
         for (let wy = b.y + 12; wy < b.y + b.h - 10; wy += 18) {
           ctx.fillRect(wx, wy, 10, 12);
+        }
+      }
+    } else if (b.w > 100 && b.h > 100) {
+      // Big block: sparse warm lit windows so the facade reads as inhabited.
+      ctx.fillStyle = 'rgba(255,220,150,0.30)';
+      for (let wx = b.x + 16; wx < b.x + b.w - 12; wx += 26) {
+        for (let wy = b.y + 16; wy < b.y + b.h - 12; wy += 26) {
+          ctx.fillRect(wx, wy, 11, 13);
         }
       }
     } else if (b.roof > 0.5) {
@@ -223,7 +262,29 @@ function drawProps(ctx, game) {
 }
 
 function drawMarkers(ctx, game) {
-  const marker = game.missions.marker();
+  // Street race: every checkpoint gate, the next one pulsing bright.
+  const step = game.missions.step;
+  if (game.missions.active && step && step.type === 'race') {
+    for (let i = 0; i < step.gates.length; i += 1) {
+      const gate = step.gates[i];
+      const isNext = i === game.missions.raceGate;
+      const isDone = i < game.missions.raceGate;
+      const pulse = isNext ? 1 + Math.sin(game.time * 4) * 0.15 : 1;
+      ctx.save();
+      ctx.globalAlpha = isDone ? 0.35 : isNext ? 0.95 : 0.6;
+      ctx.fillStyle = isDone ? '#37d67a' : '#ff9a3d';
+      ctx.beginPath();
+      ctx.ellipse(gate.x, gate.y, 30 * pulse, 12 * pulse, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 13px "Trebuchet MS", Verdana, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(String(i + 1), gate.x, gate.y + 5);
+      ctx.textAlign = 'left';
+      ctx.restore();
+    }
+  }
+  const marker = (game.missions.active && step && step.type === 'race') ? null : game.missions.marker();
   if (marker) {
     const pulse = 1 + Math.sin(game.time * 4) * 0.15;
     ctx.save();
@@ -406,6 +467,80 @@ function drawPlayer(ctx, game) {
     ctx.arc(24, 0, 5, 0, Math.PI * 2);
     ctx.fill();
   }
+  ctx.restore();
+}
+
+/** Air One: the police helicopter, its searchlight cone and ground shadow. */
+function drawHeli(ctx, game) {
+  const heli = game.heli;
+  if (!heli) return;
+  const p = game.player;
+  const bobY = Math.sin(heli.bob) * 3;
+  // Ground shadow: a soft ellipse offset from the heli, showing altitude.
+  ctx.fillStyle = 'rgba(0,0,0,0.30)';
+  ctx.beginPath();
+  ctx.ellipse(heli.x + 26, heli.y + 34, 30, 14, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Searchlight cone: a translucent beam from the heli down to the player.
+  const dx = p.x - heli.x;
+  const dy = p.y - heli.y;
+  const d = Math.hypot(dx, dy) || 1;
+  const px = -dy / d;
+  const py = dx / d;
+  ctx.fillStyle = 'rgba(255,240,170,0.18)';
+  ctx.beginPath();
+  ctx.moveTo(heli.x, heli.y);
+  ctx.lineTo(p.x + px * 46, p.y + py * 46);
+  ctx.lineTo(p.x - px * 46, p.y - py * 46);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,240,170,0.28)';
+  ctx.beginPath();
+  ctx.ellipse(p.x, p.y, 44, 30, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Body.
+  ctx.save();
+  ctx.translate(heli.x, heli.y + bobY);
+  ctx.rotate(heli.angle);
+  ctx.fillStyle = '#2a4a6b';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 32, 15, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  // Cabin windshield.
+  ctx.fillStyle = 'rgba(160,210,255,0.75)';
+  ctx.beginPath();
+  ctx.ellipse(17, 0, 11, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Tail boom + tail rotor.
+  ctx.fillStyle = '#1d3247';
+  ctx.fillRect(-52, -4, 24, 7);
+  ctx.strokeStyle = '#c8d4e0';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-52, -10);
+  ctx.lineTo(-52, 10);
+  ctx.stroke();
+  // Main rotor: two crossed blades spinning with the rotor phase.
+  ctx.strokeStyle = 'rgba(30,40,55,0.85)';
+  ctx.lineWidth = 3;
+  const r = heli.rotor;
+  ctx.beginPath();
+  ctx.moveTo(Math.cos(r) * -44, Math.sin(r) * -44);
+  ctx.lineTo(Math.cos(r) * 44, Math.sin(r) * 44);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(Math.cos(r + Math.PI / 2) * -44, Math.sin(r + Math.PI / 2) * -44);
+  ctx.lineTo(Math.cos(r + Math.PI / 2) * 44, Math.sin(r + Math.PI / 2) * 44);
+  ctx.stroke();
+  // AIR ONE marking.
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 9px Verdana, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('AIR ONE', 0, 3);
+  ctx.textAlign = 'left';
   ctx.restore();
 }
 

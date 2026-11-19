@@ -1,8 +1,9 @@
-// Screenshot scenes behind ?shot=chase|drive|foot|police. Each one plays the
+// Screenshot scenes behind ?shot=chase|drive|foot|police|race. Each one plays the
 // real rules forward from a fresh world for a fixed number of steps, steered by
 // scripted inputs, so the frame is what real play looks like and the same seed
-// always gives the same frame. The cover (chase) shows a police pursuit with
-// the wanted level, the minimap and a mission objective in one screen.
+// always gives the same frame. The cover (chase) shows a five-star pursuit
+// with the Air One helicopter, the wanted level, the minimap and a mission
+// objective in one screen.
 import { Car } from './vehicles.js';
 import { spawnPoliceCar } from './police.js';
 
@@ -47,10 +48,12 @@ export function stageShot(name, game) {
   if (shot === 'drive') return stageDrive(game);
   if (shot === 'foot') return stageFoot(game);
   if (shot === 'police') return stagePolice(game);
+  if (shot === 'race') return stageRace(game);
   return stageChase(game);
 }
 
-/** Cover: a three-star pursuit down the avenue, mission objective on the HUD. */
+/** Cover: a five-star pursuit down the avenue — Air One overhead, a
+ * roadblock ahead, mission objective on the HUD. */
 function stageChase(game) {
   game.resetWorld(20261119);
   game.startFreePlay();
@@ -58,12 +61,24 @@ function stageChase(game) {
   game.missions.stepIndex = 2; // the escape step
   game.missions.onStepStart();
   putPlayerInCar(game, 'sports', 700, 1450, 0, 250);
-  game.wanted.add(120); // three stars
+  game.wanted.add(320); // five stars: Air One + roadblock join the chase
   // Three cruisers closing in from behind and the side, on the roads.
   placePolice(game, 440, 1470);
   placePolice(game, 320, 1420);
   placePolice(game, 1050, 1050);
   playForward(game, 4, () => ({ up: true, down: false, left: false, right: false, run: false }));
+  // Stage the car pristine: a smoking wreck reads as a lost chase, and
+  // the cover should show the pursuit at its best (a fresh car mid-chase).
+  game.player.car.hp = game.player.car.def.hp;
+  game.player.car.smoke = 0;
+  // Clear any pickup toast so the cover shows only the mission banner.
+  game.missions.message = '';
+  game.missions.messageTimer = 0;
+  // Frozen dust puffs behind the player's car: the frame reads as motion.
+  const rearX = game.player.x - Math.cos(game.player.angle) * 42;
+  const rearY = game.player.y - Math.sin(game.player.angle) * 42;
+  game.spawnDust(rearX, rearY, 8);
+  game.spawnDust(game.player.x - Math.cos(game.player.angle) * 72, game.player.y - Math.sin(game.player.angle) * 72, 5);
   return { screen: 'play' };
 }
 
@@ -73,6 +88,10 @@ function stageDrive(game) {
   game.startFreePlay();
   putPlayerInCar(game, 'sedan', 650, 650, 0, 250);
   playForward(game, 4, () => ({ up: true, down: false, left: false, right: false, run: false }));
+  // A light dust trail so the cruise reads as moving, not parked.
+  const rearX = game.player.x - Math.cos(game.player.angle) * 42;
+  const rearY = game.player.y - Math.sin(game.player.angle) * 42;
+  game.spawnDust(rearX, rearY, 5);
   return { screen: 'play' };
 }
 
@@ -93,6 +112,18 @@ function stageFoot(game) {
   });
   // Freeze a punch mid-swing for the shot.
   game.player.punchTimer = 0.2;
+  // A frozen muzzle flash at the pistol's barrel tip: the shot reads as
+  // a gunfight, not a still life. (Deterministic: fixed offset, no RNG.)
+  game.particles.push({
+    x: game.player.x + Math.cos(game.player.angle) * 26,
+    y: game.player.y + Math.sin(game.player.angle) * 26,
+    vx: 0, vy: 0, life: 1, maxLife: 1, color: '#ffe9a3', size: 9,
+  });
+  game.particles.push({
+    x: game.player.x + Math.cos(game.player.angle) * 34,
+    y: game.player.y + Math.sin(game.player.angle) * 34,
+    vx: 0, vy: 0, life: 1, maxLife: 1, color: '#ff9a3d', size: 5,
+  });
   return { screen: 'play' };
 }
 
@@ -112,5 +143,21 @@ function stagePolice(game) {
   const block = game.makeRoadblock(Math.PI);
   game.police.push(...block);
   playForward(game, 2.8, () => ({ up: true, down: false, left: false, right: false, run: false }));
+  return { screen: 'play' };
+}
+
+/** Street Heat: mid-race down Casino Row, the first checkpoint gate ahead. */
+function stageRace(game) {
+  game.resetWorld(20261119);
+  game.startFreePlay();
+  game.missions.startMission(5); // Street Heat
+  game.missions.stepIndex = 1; // the race step (gates + 60s clock)
+  game.missions.onStepStart();
+  putPlayerInCar(game, 'sports', 1500, 650, 0, 300);
+  playForward(game, 2.5, () => ({ up: true, down: false, left: false, right: false, run: false }));
+  // Frozen dust puffs behind the race car: the frame reads as speed.
+  const rearX = game.player.x - Math.cos(game.player.angle) * 42;
+  const rearY = game.player.y - Math.sin(game.player.angle) * 42;
+  game.spawnDust(rearX, rearY, 8);
   return { screen: 'play' };
 }

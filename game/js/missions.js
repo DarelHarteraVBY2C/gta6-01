@@ -1,4 +1,4 @@
-// Solmar Bay missions: a five-job story for Danny Cole, plus taxi fares and
+// Solmar Bay missions: a seven-job story for Danny Cole, plus taxi fares and
 // cash bundles scattered around the city. Each mission is a list of steps; the
 // manager tracks the current step, spawns enemies and markers, and pays out.
 import { dist, rand, pick } from './utils.js';
@@ -50,6 +50,35 @@ export const STORY = [
       { type: 'escape', x: 250, y: 1450, r: 80, text: 'Escape to the hideout with the cash' },
     ],
   },
+  {
+    id: 'street-heat', name: 'Street Heat', reward: 1500,
+    intro: 'Vera put money on you in the underground street race. Bring a fast car and beat the clock.',
+    steps: [
+      { type: 'goto', x: 780, y: 650, r: 70, text: 'Get a fast car, then reach the start line' },
+      {
+        type: 'race', timeLimit: 60, r: 70,
+        text: 'Street race — hit every checkpoint before the clock runs out',
+        gates: [
+          { x: 2250, y: 650 },
+          { x: 2650, y: 1450 },
+          { x: 2250, y: 2250 },
+          { x: 650, y: 2250 },
+          { x: 780, y: 650 },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'getaway-driver', name: 'The Getaway Driver', reward: 2000,
+    intro: 'Three drops, one night, and the whole SBPD on your tail. Grab the package at the docks and don\'t stop.',
+    steps: [
+      { type: 'goto', x: 3100, y: 1450, r: 80, text: 'Go to the docks pickup' },
+      { type: 'pickup', x: 3100, y: 1450, r: 60, text: 'Grab the package (press E)' },
+      { type: 'goto', x: 700, y: 2250, r: 70, text: 'Drop 1/3: the Boardwalk Cafe' },
+      { type: 'goto', x: 1050, y: 250, r: 70, text: 'Drop 2/3: Old Town' },
+      { type: 'goto', x: 2650, y: 650, r: 70, text: 'Drop 3/3: Harbor Port' },
+    ],
+  },
 ];
 
 /** A Harbor Crew gunman: walks at the player and shoots when close. */
@@ -80,6 +109,8 @@ export class MissionManager {
     this.taxi = { state: 'idle', pickup: null, dest: null, timer: 0, fare: 0 };
     this.completedCount = 0;
     this.failed = false;
+    this.raceGate = 0; // street race: index of the next checkpoint gate
+    this.raceTimer = 0; // street race: seconds left on the clock
   }
 
   get mission() { return STORY[this.missionIndex] || null; }
@@ -138,6 +169,12 @@ export class MissionManager {
       this.targetCar = car;
       this.showMessage('There it is — the red Falco GT. Take it.', 4);
     }
+    if (step.type === 'race') {
+      // Street race: first gate is the start line, clock starts now.
+      this.raceGate = 0;
+      this.raceTimer = step.timeLimit;
+      this.showMessage('Street Heat — hit every checkpoint before the clock runs out!', 4);
+    }
     if (this.missionIndex === 2 && this.stepIndex === 0) {
       // Payback hands Danny a pistol.
       game.player.givePistol(12);
@@ -166,6 +203,11 @@ export class MissionManager {
       if (alive) return { x: alive.x, y: alive.y, color: '#ff5d5d' };
       return null;
     }
+    if (step.type === 'race') {
+      const gate = step.gates[this.raceGate];
+      if (gate) return { x: gate.x, y: gate.y, color: '#ff9a3d' };
+      return null;
+    }
     if (step.x !== undefined) return { x: step.x, y: step.y, color: '#ffe14d' };
     return null;
   }
@@ -179,6 +221,9 @@ export class MissionManager {
     const step = this.step;
     let text = step.text;
     if (step.type === 'kill') text = 'Take down the Harbor Crew (' + this.kills + '/' + step.count + ')';
+    if (step.type === 'race') {
+      text = 'Checkpoint ' + this.raceGate + '/' + step.gates.length + ' — ' + Math.ceil(this.raceTimer) + 's left';
+    }
     return this.mission.name + ': ' + text;
   }
 
@@ -225,6 +270,9 @@ export class MissionManager {
         if (this.missionIndex === 4) {
           game.wanted.add(200); // the bank job trips every alarm in the city
           this.showMessage('Vault cash grabbed! Every cop in Solmar Bay is coming.', 4);
+        } else if (this.missionIndex === 6) {
+          game.wanted.add(120); // the getaway job: three stars from the docks
+          this.showMessage('Package grabbed. Three stars — don\'t stop for anyone.', 4);
         } else {
           game.wanted.add(25); // the drop is hot
           this.showMessage('Package grabbed. Cops are on to you — move!', 4);
@@ -257,6 +305,27 @@ export class MissionManager {
     this.updateTaxi(dt);
     if (!this.active || !this.step) return;
     const step = this.step;
+    if (step.type === 'race') {
+      // Street race: drive through the gates in order before the clock
+      // runs out. Out of time sends Danny back to the start line.
+      this.raceTimer -= dt;
+      const gate = step.gates[this.raceGate];
+      if (gate && dist(player.x, player.y, gate.x, gate.y) < step.r) {
+        this.raceGate += 1;
+        game.audio.pickup();
+        if (this.raceGate >= step.gates.length) {
+          const done = this.advanceStep();
+          if (done === 'complete') this.completeMission();
+        } else {
+          this.showMessage('Checkpoint ' + this.raceGate + '/' + step.gates.length + '!', 2);
+        }
+      } else if (this.raceTimer <= 0) {
+        this.showMessage('Out of time — back to the start line.', 4);
+        game.audio.missionFail();
+        this.retryMission();
+      }
+      return;
+    }
     if (step.type === 'goto' || step.type === 'escape') {
       if (dist(player.x, player.y, step.x, step.y) < step.r) {
         const done = this.advanceStep();

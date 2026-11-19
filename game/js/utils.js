@@ -103,3 +103,12 @@ export function clock(seconds) {
   const s = Math.floor(seconds % 60);
   return m + ':' + String(s).padStart(2, '0');
 }
+
+/** Darken (f < 1) or lighten (f > 1) a #rrggbb hex color. */
+export function shade(hex, f) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.min(255, Math.max(0, Math.round(((n >> 16) & 255) * f)));
+  const g = Math.min(255, Math.max(0, Math.round(((n >> 8) & 255) * f)));
+  const b = Math.min(255, Math.max(0, Math.round((n & 255) * f)));
+  return 'rgb(' + r + ',' + g + ',' + b + ')';
+}

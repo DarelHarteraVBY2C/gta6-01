@@ -1,11 +1,15 @@
 // The Solmar Bay Police Department: the wanted system, police cruisers that
-// chase and ram, roadblocks at high heat, and getting busted on foot.
+// chase and ram, roadblocks at high heat, the Air One helicopter at five
+// stars, and getting busted on foot.
 import { clamp, dist, rand, pick, angleDiff } from './utils.js';
 import { AVENUES, STREETS, randomRoadPointFar } from './city.js';
-import { Car, steerToward, driveCar } from './vehicles.js';
+import { Car, steerToward, driveCar, collidesAt } from './vehicles.js';
 
 export const WANTED_THRESHOLDS = [0, 25, 60, 120, 200, 320];
 export const MAX_WANTED = 5;
+
+/** Air One: the police helicopter. Set false to disable it entirely. */
+export const HELI_ENABLED = true;
 
 /** How many police cars hunt the player at each wanted level. */
 export function policeCountFor(level) {
@@ -36,8 +40,23 @@ export function policeWaypoint(car, tx, ty) {
   const onSt = st.dist < 70;
   if (onAve && Math.abs(ty - ave.coord) < 70) return { x: tx, y: ty };
   if (onSt && Math.abs(tx - st.coord) < 70) return { x: tx, y: ty };
-  if (onAve) return { x: nearestCoord(tx, STREETS).coord, y: ave.coord };
-  if (onSt) return { x: st.coord, y: nearestCoord(ty, AVENUES).coord };
+  if (onAve) {
+    const sx = nearestCoord(tx, STREETS).coord;
+    if (Math.abs(car.x - sx) < 70) {
+      // Already at the corner street: head along it toward the target
+      // instead of returning our own position (which spins the car).
+      return { x: sx, y: nearestCoord(ty, AVENUES).coord };
+    }
+    return { x: sx, y: ave.coord };
+  }
+  if (onSt) {
+    const ay = nearestCoord(ty, AVENUES).coord;
+    if (Math.abs(car.y - ay) < 70) {
+      // Already at the corner avenue: head along it toward the target.
+      return { x: nearestCoord(tx, STREETS).coord, y: ay };
+    }
+    return { x: st.coord, y: ay };
+  }
   // Off-road (just spawned): head for the nearest road first.
   return ave.dist <= st.dist ? { x: car.x, y: ave.coord } : { x: st.coord, y: car.y };
 }
@@ -159,8 +178,14 @@ export function updatePoliceCar(car, dt, city, allCars, player, rng) {
     if (d < 58) {
       const ux = (player.car.x - car.x) / (d || 1);
       const uy = (player.car.y - car.y) / (d || 1);
-      player.car.x += ux * 26;
-      player.car.y += uy * 26;
+      // Shove the player's car, but never into a building: try the full
+      // shove, then half, then skip the positional shove (the speed boost
+      // still applies). A shove into a block wedges the car permanently.
+      const r = Math.max(player.car.length, player.car.width) * 0.5;
+      let shove = 26;
+      while (shove > 0 && collidesAt(city, player.car.x + ux * shove, player.car.y + uy * shove, r)) shove /= 2;
+      player.car.x += ux * shove;
+      player.car.y += uy * shove;
       player.car.speed += 120;
       player.car.hp -= 6;
       car.speed *= 0.6;
@@ -203,4 +228,43 @@ export function nearestPoliceDistance(police, x, y) {
     if (d < best) best = d;
   }
   return best;
+}
+
+/** Air One: the police helicopter that shadows the player from above. */
+export class Helicopter {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.angle = 0; // heading (faces the player)
+    this.rotor = 0; // rotor spin phase
+    this.bob = 0; // hover bob phase
+  }
+}
+
+/** Spawn the helicopter above and behind the player. */
+export function spawnHelicopter(px, py) {
+  return new Helicopter(px - 120, py - 160);
+}
+
+/**
+ * Shadow the player from the sky: the heli drifts toward a hover point
+ * just above the player and never collides with buildings (it flies over
+ * them). Returns 'despawn' when the heat drops below 5 stars.
+ */
+export function updateHelicopter(heli, dt, player, wantedLevel) {
+  if (wantedLevel < 5) return 'despawn';
+  heli.rotor += dt * 28;
+  heli.bob += dt * 2;
+  const tx = player.x - 90;
+  const ty = player.y - 130;
+  const dx = tx - heli.x;
+  const dy = ty - heli.y;
+  const d = Math.hypot(dx, dy) || 1;
+  // Faster than any car (the Falco GT tops out at 560) so Air One can
+  // keep up with a speeding player instead of trailing far behind.
+  const speed = Math.min(640, d * 2.2);
+  heli.x += (dx / d) * speed * dt;
+  heli.y += (dy / d) * speed * dt;
+  heli.angle = Math.atan2(player.y - heli.y, player.x - heli.x);
+  return null;
 }

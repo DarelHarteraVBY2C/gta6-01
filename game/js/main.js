@@ -2,13 +2,22 @@
 // state machine (title, play, pause, wasted, busted, finished), steps the
 // simulation, resolves combat, and saves to localStorage. Every other module
 // plugs into this Game object.
+//
+// The game: an original open-world crime game (GTA-style, no Rockstar
+// assets). Danny Cole, getaway driver in the coastal city Solmar Bay.
+// 7 story missions for Vera (car theft, deliveries, shootouts, a checkpoint
+// street race, a 3-star getaway run, a bank heist); wanted 0-5 stars with
+// police cruisers, roadblocks at 3 stars and the Air One helicopter at
+// 5 stars; car theft, traffic, pedestrians, taxi fares, cash bundles,
+// garage engine/armor upgrades, combat (fists + pistol), HUD + minimap,
+// save to localStorage, synthesized WebAudio.
 import { mulberry32, rand, clamp, dist } from './utils.js';
 import { generateCity, CITY_WIDTH, CITY_HEIGHT } from './city.js';
 import { AudioEngine } from './audio.js';
 import { Player } from './player.js';
-import { Car, driveCar, spawnParkedCars } from './vehicles.js';
+import { Car, driveCar, spawnParkedCars, steerToward } from './vehicles.js';
 import { spawnTraffic, updateTrafficCar, spawnPeds, updatePed, scarePeds } from './traffic.js';
-import { Wanted, spawnPoliceCar, updatePoliceCar, policeCountFor, nearestPoliceDistance, makeRoadblock } from './police.js';
+import { Wanted, spawnPoliceCar, updatePoliceCar, policeCountFor, nearestPoliceDistance, makeRoadblock, policeWaypoint, HELI_ENABLED, spawnHelicopter, updateHelicopter } from './police.js';
 import { MissionManager, STORY } from './missions.js';
 import { drawHUD } from './hud.js';
 import { Camera, drawWorld, drawTitleScreen, drawPauseScreen, drawEndScreen, VIEW_W, VIEW_H } from './render.js';
@@ -50,9 +59,10 @@ export class Game {
     this.city = generateCity(CITY_SEED);
     this.player = new Player(START_POS.x, START_POS.y);
     this.cars = spawnParkedCars(this.city, this.rng, 16, START_POS.x, START_POS.y);
-    this.cars.push(...spawnTraffic(this.city, this.rng, 22));
-    this.peds = spawnPeds(this.city, this.rng, 36, START_POS.x, START_POS.y);
+    this.cars.push(...spawnTraffic(this.city, this.rng, 26));
+    this.peds = spawnPeds(this.city, this.rng, 44, START_POS.x, START_POS.y);
     this.police = [];
+    this.heli = null; // Air One: the police helicopter (5 stars only)
     this.wanted = new Wanted();
     this.missions = new MissionManager(this);
     this.missions.seedPickups(this.rng);
@@ -86,6 +96,8 @@ export class Game {
       this.player.cash = save.cash;
       this.player.hp = save.hp;
       this.player.armor = save.armor;
+      this.player.engineLevel = save.engineLevel || 0;
+      this.player.armorLevel = save.armorLevel || 0;
       this.player.x = save.playerX;
       this.player.y = save.playerY;
       this.playTime = save.playTime || 0;
@@ -108,6 +120,8 @@ export class Game {
         cash: Math.floor(this.player.cash),
         hp: Math.floor(this.player.hp),
         armor: Math.floor(this.player.armor),
+        engineLevel: this.player.engineLevel,
+        armorLevel: this.player.armorLevel,
         playerX: Math.round(this.player.x),
         playerY: Math.round(this.player.y),
         playTime: Math.round(this.playTime),
@@ -187,6 +201,40 @@ export class Game {
     if (key === 'e') this.interactKey();
     if (key === 'f') this.punchKey();
     if (key === ' ') this.tryShoot();
+    if (key === 'g') this.garageKey('engine');
+    if (key === 'h') this.garageKey('armor');
+  }
+
+  /** Vera's Garage: tune the car you are driving. G buys an engine level
+   * (+8% top speed, $400), H buys armor plating (+25 max car HP, $300),
+   * each up to level 3. Only works parked at the garage in a car. */
+  garageKey(kind) {
+    const player = this.player;
+    if (!player.inCar) return;
+    if (dist(player.x, player.y, 780, 650) > 90) return;
+    const level = kind === 'engine' ? player.engineLevel : player.armorLevel;
+    const cost = kind === 'engine' ? 400 : 300;
+    if (level >= 3) {
+      this.missions.showMessage('Already maxed out.', 2);
+      return;
+    }
+    if (player.cash < cost) {
+      this.missions.showMessage('Not enough cash — need $' + cost + '.', 2);
+      return;
+    }
+    player.cash -= cost;
+    if (kind === 'engine') {
+      player.engineLevel += 1;
+      this.missions.showMessage('Engine tuned to Lv ' + player.engineLevel + ' — faster top speed!', 3);
+    } else {
+      player.armorLevel += 1;
+      const car = player.car;
+      car.maxHp = car.def.hp + 25 * player.armorLevel;
+      car.hp = Math.min(car.hp + 25, car.maxHp);
+      this.missions.showMessage('Armor plating Lv ' + player.armorLevel + ' — +25 max car HP!', 3);
+    }
+    this.audio.pickup();
+    this.saveGame();
   }
 
   interactKey() {
@@ -268,6 +316,20 @@ export class Game {
     return makeRoadblock(this.city, this.rng, this.player.x, this.player.y, headingAngle);
   }
 
+  /** Debug/test hook: the next road-grid waypoint toward (tx, ty) for the
+   * player's car, using the same L-shaped routing the police use. */
+  waypointTo(tx, ty) {
+    const car = this.player.car || this.player;
+    return policeWaypoint(car, tx, ty);
+  }
+
+  /** Debug/test hook: steer the player's car toward (tx, ty) using the
+   * same helper the police use (it turns the car in place, then drives). */
+  steerTo(tx, ty) {
+    const car = this.player.car || this.player;
+    return steerToward(car, tx, ty, 1 / 60, 0.8);
+  }
+
   // ---- menus ---------------------------------------------------------------
 
   loadTitleButtons() {
@@ -339,7 +401,8 @@ export class Game {
     // Player: drive or walk.
     if (player.inCar) {
       const car = player.car;
-      const hit = driveCar(car, input, dt, this.city, allCars);
+      const speedBonus = 1 + player.engineLevel * 0.08; // garage tuning
+      const hit = driveCar(car, input, dt, this.city, allCars, speedBonus);
       if (hit && Math.abs(car.speed) > 240) {
         this.audio.crash();
         this.shake = Math.min(1, this.shake + 0.4);
@@ -381,6 +444,16 @@ export class Game {
       this.missions.showMessage('SBPD roadblock ahead!', 3);
     }
     if (this.wanted.level < 3) this.roadblockSpawned = false;
+    // Air One: the helicopter shadows the player at 5 stars and leaves
+    // when the heat drops. It flies above the buildings, so it can never
+    // get stuck on the road grid.
+    if (HELI_ENABLED && this.wanted.level >= 5 && !this.heli) {
+      this.heli = spawnHelicopter(player.x, player.y);
+      this.missions.showMessage('Air One is overhead. Lose them, Danny!', 3);
+    }
+    if (this.heli && updateHelicopter(this.heli, dt, player, this.wanted.level) === 'despawn') {
+      this.heli = null;
+    }
     const policeNear = nearestPoliceDistance(this.police, player.x, player.y) < 500;
     for (const car of [...this.police]) {
       const event = updatePoliceCar(car, dt, this.city, allCars, player, this.rng);
@@ -544,6 +617,20 @@ export class Game {
       this.particles.push({
         x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
         life: 0.35, maxLife: 0.35, color: '#ffe9a3', size: 2 + Math.random() * 2,
+      });
+    }
+  }
+
+  // Frozen dust puffs: fixed positions, zero velocity, full life, so they
+  // read as a still dust cloud in a staged ?shot= render (and as lingering
+  // dust behind a drifting car in normal play).
+  spawnDust(x, y, count) {
+    for (let i = 0; i < count; i += 1) {
+      const a = (i / count) * Math.PI * 2 + 0.7;
+      const r = 8 + (i % 3) * 10;
+      this.particles.push({
+        x: x + Math.cos(a) * r, y: y + Math.sin(a) * r, vx: 0, vy: 0,
+        life: 1, maxLife: 1, color: 'rgba(210,185,140,0.85)', size: 5 + (i % 3) * 2,
       });
     }
   }

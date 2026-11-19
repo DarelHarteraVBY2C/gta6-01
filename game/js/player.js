@@ -20,6 +20,8 @@ export class Player {
     this.armor = 0;
     this.maxArmor = 100;
     this.cash = 150;
+    this.engineLevel = 0; // garage tuning: +8% top speed per level (max 3)
+    this.armorLevel = 0; // garage plating: +25 max car HP per level (max 3)
     this.weapon = 'fists'; // 'fists' | 'pistol'
     this.ammo = 0;
     this.reserveAmmo = 0;
@@ -138,6 +140,8 @@ export class Player {
     if (car.driver === 'traffic' || car.driver === 'police') car.driver = null;
     this.car = car;
     car.driver = 'player';
+    // Garage armor plating raises this car's max HP.
+    car.maxHp = car.def.hp + 25 * this.armorLevel;
     this.x = car.x;
     this.y = car.y;
   }

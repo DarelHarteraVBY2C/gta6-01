@@ -1,7 +1,7 @@
 // Solmar Bay vehicles: car types, arcade top-down driving physics, parking and
 // collisions. Every car on the street — parked, traffic, police or the player's —
 // is one of these.
-import { clamp, rand, pick, angleLerp, angleDiff, dist } from './utils.js';
+import { clamp, rand, pick, angleLerp, angleDiff, dist, pushCircleOutOfRect } from './utils.js';
 import { isOnRoad, randomRoadPoint } from './city.js';
 
 export const CAR_TYPES = {
@@ -28,9 +28,11 @@ export class Car {
     this.color = o.color || type.color;
     this.speed = 0;
     this.hp = type.hp;
+    this.maxHp = type.hp; // raised by garage armor plating
     this.driver = o.driver || null; // 'player' | 'traffic' | 'police' | null (parked)
     this.dead = false;
     this.smoke = 0; // seconds of smoke left after a hard hit
+    this.collideCooldown = 0; // seconds until this car can take crash damage again
     this.lightPhase = 0;
     this.id = Car.nextId;
     Car.nextId += 1;
@@ -48,11 +50,14 @@ Car.nextId = 1;
 
 /**
  * One step of arcade driving. `input` is {up, down, left, right} booleans.
- * Returns true when the car hit something solid this step.
+ * `speedBonus` multiplies the top speed (garage engine tuning for the
+ * player's car). Returns true when the car hit something solid this step.
  */
-export function driveCar(car, input, dt, city, others) {
+export function driveCar(car, input, dt, city, others, speedBonus) {
   const def = car.def;
+  const bonus = speedBonus || 1;
   let hit = false;
+  if (car.collideCooldown > 0) car.collideCooldown -= dt;
   if (input.up) car.speed += def.accel * dt;
   if (input.down) {
     if (car.speed > 20) car.speed -= def.accel * 1.4 * dt; // brake
@@ -63,7 +68,7 @@ export function driveCar(car, input, dt, city, others) {
     car.speed -= car.speed * 1.4 * dt;
     if (Math.abs(car.speed) < 4) car.speed = 0;
   }
-  car.speed = clamp(car.speed, -170, def.maxSpeed);
+  car.speed = clamp(car.speed, -170, def.maxSpeed * bonus);
   // Steering bites harder the faster the car goes, and reverses when reversing.
   const speedFactor = clamp(Math.abs(car.speed) / 160, 0, 1);
   const steer = (input.left ? -1 : 0) + (input.right ? 1 : 0);
@@ -99,9 +104,15 @@ export function driveCar(car, input, dt, city, others) {
         const rel = car.speed - other.speed;
         car.speed -= rel * 0.35;
         other.speed += rel * 0.35;
-        if (Math.abs(rel) > 60) {
+        // Crash damage, but at most once per half second per car: without
+        // the cooldown a sustained overlap melts a car's hp in ~1s.
+        // (Gated on this car's cooldown only: parked cars never run
+        // driveCar, so their cooldown would never tick down.)
+        if (Math.abs(rel) > 60 && car.collideCooldown <= 0) {
           car.hp -= 2;
           other.hp -= 2;
+          car.collideCooldown = 0.5;
+          other.collideCooldown = 0.5;
         }
         hit = true;
       }
@@ -113,6 +124,13 @@ export function driveCar(car, input, dt, city, others) {
 
 /** Move the car, sliding along building walls; returns true on a wall hit. */
 function tryMove(car, ox, oy, city, r) {
+  // Escape hatch: if the car is already inside a building (shoved there by
+  // a police ram or a collision), push it out along the smallest
+  // penetration axis first — otherwise no step can ever move it again.
+  for (const b of city.buildings) {
+    const fixed = pushCircleOutOfRect(car.x, car.y, r, b);
+    if (fixed) { car.x = fixed.x; car.y = fixed.y; break; }
+  }
   // Try the full step, then each axis alone, so the car slides along walls.
   if (!collidesAt(city, car.x, car.y, r)) return false;
   // Revert to the previous position, then try x-only and y-only.
@@ -132,7 +150,7 @@ function tryMove(car, ox, oy, city, r) {
   return true;
 }
 
-function collidesAt(city, x, y, r) {
+export function collidesAt(city, x, y, r) {
   for (const b of city.buildings) {
     if (x + r < b.x || x - r > b.x + b.w || y + r < b.y || y - r > b.y + b.h) continue;
     const cx = clamp(x, b.x, b.x + b.w);

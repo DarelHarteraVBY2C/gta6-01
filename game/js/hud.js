@@ -61,6 +61,12 @@ export function drawHUD(ctx, game, viewW, viewH) {
     ctx.fillStyle = '#9fd8ff';
     ctx.font = '13px "Trebuchet MS", Verdana, sans-serif';
     ctx.fillText(player.car.def.name + '  •  E: exit car', 18, viewH - 22);
+    // Vera's Garage: show the tune-up prices when parked at the garage.
+    if (dist(player.x, player.y, 780, 650) < 90) {
+      ctx.fillStyle = '#ffe14d';
+      ctx.font = 'bold 13px "Trebuchet MS", Verdana, sans-serif';
+      ctx.fillText('GARAGE — G: Engine $400 (Lv ' + player.engineLevel + '/3)   H: Armor $300 (Lv ' + player.armorLevel + '/3)', 18, viewH - 66);
+    }
   } else {
     ctx.fillStyle = '#ffffff';
     ctx.font = '13px "Trebuchet MS", Verdana, sans-serif';

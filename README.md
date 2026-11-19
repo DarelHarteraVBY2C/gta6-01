@@ -7,7 +7,7 @@
 An original open-world crime game in the spirit of GTA 6 — built from scratch
 in plain HTML5 Canvas and JavaScript, no libraries, no network, no assets to
 download. You are **Danny Cole**, a getaway driver in the sun-soaked coastal
-city of **Solmar Bay**. Run five jobs for the fixer Vera, steal cars, outrun
+city of **Solmar Bay**. Run seven jobs for the fixer Vera, steal cars, outrun
 the Solmar Bay Police Department, and take the city for yourself.
 
 Everything is original: the city, the characters, the vehicles, the story and
@@ -27,12 +27,17 @@ one to five stars.
 - **On foot and by car** — walk, run, punch, shoot; steal any parked or
   driven car (press E) and drive it with arcade physics
 - **Wanted level + police** — stealing, hitting pedestrians, shooting and
-  crashing raise your heat; cruisers chase and ram you, and at three stars
-  the SBPD sets up roadblocks. Lie low and the heat cools off — or get
-  busted and lose 10% of your cash
-- **Missions + story** — five jobs for Vera: *Wheels Up*, *The Drop*,
-  *Payback*, *Hot Wheels* and *The Big Score*, with markers, an objective
-  banner, a minimap and an off-screen arrow
+  crashing raise your heat; cruisers chase and ram you, at three stars
+  the SBPD sets up roadblocks, and at five stars the Air One helicopter
+  shadows you from above with a searchlight. Lie low and the heat cools
+  off — or get busted and lose 10% of your cash
+- **Missions + story** — seven jobs for Vera: *Wheels Up*, *The Drop*,
+  *Payback*, *Hot Wheels*, *The Big Score*, *Street Heat* (a checkpoint
+  race against the clock) and *The Getaway Driver* (three drops at three
+  stars), with markers, an objective banner, a minimap and an off-screen arrow
+- **Garage upgrades** — at Vera's Garage, tune the car you drive: engine
+  levels (+8% top speed each) and armor plating (+25 max car HP each), up
+  to level 3, bought with cash and kept across saves
 - **Combat** — fists and a pistol, armed Harbor Crew gunmen, car explosions
 - **Side work** — taxi fares (steal a taxi and passengers appear) and cash
   bundles hidden around the city
@@ -51,6 +56,7 @@ one to five stars.
 | Shift | Run |
 | E | Steal / exit car, grab a package |
 | F | Punch |
+| G / H | At Vera's Garage: buy engine / armor upgrade |
 | Mouse + click (or Space) | Aim and shoot |
 | P / Esc | Pause |
 | M | Mute |
@@ -83,11 +89,11 @@ game/
     vehicles.js     car types, driving physics, parking, collisions
     traffic.js      traffic AI and pedestrians
     police.js       wanted system, cruiser pursuit, roadblocks, busts
-    missions.js     the five-job story, taxi fares, cash bundles
-    hud.js          health, stars, cash, objective, minimap
-    render.js       golden-hour rendering, camera, menus
+    missions.js     the seven-job story, street race, taxi fares, cash bundles
+    hud.js          health, stars, cash, objective, minimap, garage hint
+    render.js       golden-hour rendering, camera, menus, helicopter
     audio.js        synthesized WebAudio: engine, sirens, music
-    shots.js        deterministic screenshot scenes (?shot=chase|drive|foot|police)
+    shots.js        deterministic screenshot scenes (?shot=chase|race|foot|police|drive)
     utils.js        seeded RNG and math helpers
 ```
 
