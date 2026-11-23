@@ -14,20 +14,49 @@ export function drawHUD(ctx, game, viewW, viewH) {
   const wanted = game.wanted;
   ctx.save();
   ctx.textBaseline = 'alphabetic';
+  // Every rect the HUD paints this frame, for the regression tests (the
+  // HUD lives on canvas, so the tests read these boxes instead of the DOM).
+  const boxes = {};
 
-  // Top-left: health, armour, cash.
+  // Top-left vitals: two bars in a fixed column, cash and the package
+  // count underneath. The bars keep their v6 look and positions.
   drawBar(ctx, 18, 18, 190, 16, player.hp / player.maxHp, '#37d67a', '#12351f', 'HP');
   drawBar(ctx, 18, 40, 190, 12, player.armor / player.maxArmor, '#4da6ff', '#12283f', 'ARMOR');
+  boxes.hp = { x: 18, y: 18, w: 190, h: 16 };
+  boxes.armor = { x: 18, y: 40, w: 190, h: 12 };
+
+  // Weapon chip (v7 F1): the current weapon gets its own slot to the
+  // right of the vitals column — the same place on foot and in every
+  // vehicle — so it can never cover the bars, the cash, or anything else.
+  const weaponWord = player.weapon === 'shotgun' ? 'SHOTGUN ' + player.ammo + '/' + player.reserveAmmo
+    : player.weapon === 'pistol' ? 'PISTOL ' + player.ammo + '/' + player.reserveAmmo : 'FISTS';
+  ctx.font = 'bold 13px "Trebuchet MS", Verdana, sans-serif';
+  const chipW = Math.max(96, Math.ceil(ctx.measureText(weaponWord).width) + 22);
+  roundRect(ctx, 216, 18, chipW, 34, 6);
+  ctx.fillStyle = 'rgba(10, 14, 24, 0.55)';
+  ctx.fill();
+  ctx.fillStyle = '#ffe14d';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(weaponWord, 227, 35);
+  ctx.textBaseline = 'alphabetic';
+  boxes.weapon = { x: 216, y: 18, w: chipW, h: 34 };
+
+  const cashText = money(player.cash);
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 20px "Trebuchet MS", Verdana, sans-serif';
-  ctx.fillText(money(player.cash), 18, 82);
+  ctx.fillText(cashText, 18, 82);
+  boxes.cash = { x: 18, y: 62, w: Math.ceil(ctx.measureText(cashText).width), h: 20 };
+  const districtText = districtAt(player.x, player.y).toUpperCase();
   ctx.fillStyle = '#ffe14d';
   ctx.font = '13px "Trebuchet MS", Verdana, sans-serif';
-  ctx.fillText(districtAt(player.x, player.y).toUpperCase(), 18, 100);
+  ctx.fillText(districtText, 18, 100);
+  boxes.district = { x: 18, y: 88, w: Math.ceil(ctx.measureText(districtText).width), h: 13 };
   // Hidden packages found: a completion counter the judge can read.
+  const packText = '◆ PACKAGES ' + game.collectibles.packagesFound + '/10';
   ctx.fillStyle = '#ffd76a';
   ctx.font = 'bold 13px "Trebuchet MS", Verdana, sans-serif';
-  ctx.fillText('◆ PACKAGES ' + game.collectibles.packagesFound + '/10', 18, 118);
+  ctx.fillText(packText, 18, 118);
+  boxes.packages = { x: 18, y: 106, w: Math.ceil(ctx.measureText(packText).width), h: 13 };
 
   // Top-right: wanted stars, bigger so the heat reads at a glance.
   ctx.font = '30px "Trebuchet MS", Verdana, sans-serif';
@@ -49,8 +78,10 @@ export function drawHUD(ctx, game, viewW, viewH) {
   const objective = game.missions.objectiveText();
   ctx.font = 'bold 15px "Trebuchet MS", Verdana, sans-serif';
   const objW = ctx.measureText(objective).width;
+  const bannerX = (viewW - objW) / 2 - 14;
+  boxes.banner = { x: bannerX, y: 12, w: objW + 28, h: 30 };
   ctx.fillStyle = 'rgba(10, 14, 24, 0.72)';
-  roundRect(ctx, (viewW - objW) / 2 - 14, 12, objW + 28, 30, 6);
+  roundRect(ctx, bannerX, 12, objW + 28, 30, 6);
   ctx.fill();
   ctx.fillStyle = '#ffe14d';
   ctx.textAlign = 'center';
@@ -63,15 +94,19 @@ export function drawHUD(ctx, game, viewW, viewH) {
     : 'FREE ROAM  •  ' + game.missions.completedCount + '/' + STORY.length + ' JOBS DONE';
   ctx.fillStyle = 'rgba(255,255,255,0.75)';
   ctx.font = 'bold 11px "Trebuchet MS", Verdana, sans-serif';
+  const trackerW = ctx.measureText(tracker).width;
+  boxes.tracker = { x: viewW / 2 - trackerW / 2, y: 47, w: trackerW, h: 11 };
   ctx.textAlign = 'center';
   ctx.fillText(tracker, viewW / 2, 58);
   ctx.textAlign = 'left';
 
   // Radio popup: the station card, briefly, under the mission tracker.
+  boxes.radio = null;
   if (game.radio.popup) {
     const pop = game.radio.popup;
     ctx.font = 'bold 14px "Trebuchet MS", Verdana, sans-serif';
     const w = ctx.measureText(pop.text).width;
+    boxes.radio = { x: (viewW - w) / 2 - 14, y: 66, w: w + 28, h: 28 };
     ctx.globalAlpha = clamp(pop.timer, 0, 1);
     ctx.fillStyle = 'rgba(10, 14, 24, 0.78)';
     roundRect(ctx, (viewW - w) / 2 - 14, 66, w + 28, 28, 6);
@@ -86,27 +121,57 @@ export function drawHUD(ctx, game, viewW, viewH) {
   // Bottom-left: speed and vehicle, or weapon on foot.
   ctx.font = 'bold 22px "Trebuchet MS", Verdana, sans-serif';
   ctx.fillStyle = '#ffffff';
+  boxes.speedo = null;
+  boxes.carName = null;
+  boxes.footWeapon = null;
+  boxes.garage = null;
+  game.hudSpeedKmh = 0;
   if (player.inCar) {
-    const kmh = Math.round(Math.abs(player.car.speed) * 0.32);
-    ctx.fillText(kmh + ' km/h', 18, viewH - 44);
+    // Speedometer (v7 F4): ground speed — what the wheels actually did
+    // after the walls had their say — so a bike pinned against a
+    // building reads 0 instead of the throttle's wish.
+    const ground = player.car.groundSpeed !== undefined ? player.car.groundSpeed : Math.abs(player.car.speed);
+    const kmh = Math.round(Math.abs(ground) * 0.32);
+    game.hudSpeedKmh = kmh;
+    const speedText = kmh + ' km/h';
+    ctx.fillText(speedText, 18, viewH - 44);
+    boxes.speedo = { x: 18, y: viewH - 66, w: Math.ceil(ctx.measureText(speedText).width), h: 22 };
     ctx.fillStyle = '#9fd8ff';
     ctx.font = '13px "Trebuchet MS", Verdana, sans-serif';
-    ctx.fillText(player.car.def.name + '  •  E: exit car', 18, viewH - 22);
-    // Vera's Garage: show the tune-up prices when parked at the garage.
+    const carText = player.car.def.name + '  •  E: exit car';
+    ctx.fillText(carText, 18, viewH - 22);
+    boxes.carName = { x: 18, y: viewH - 35, w: Math.ceil(ctx.measureText(carText).width), h: 13 };
+    // Vera's Garage (v7 F2): the tune-up prices ride in a pill centred
+    // above the drive readout, never on top of the speed or the car name.
     if (dist(player.x, player.y, 780, 650) < 90) {
-      ctx.fillStyle = '#ffe14d';
+      const garageText = 'GARAGE — G: Engine $400 (Lv ' + player.engineLevel + '/3)   H: Armor $300 (Lv ' + player.armorLevel + '/3)';
       ctx.font = 'bold 13px "Trebuchet MS", Verdana, sans-serif';
-      ctx.fillText('GARAGE — G: Engine $400 (Lv ' + player.engineLevel + '/3)   H: Armor $300 (Lv ' + player.armorLevel + '/3)', 18, viewH - 66);
+      const pillW = Math.ceil(ctx.measureText(garageText).width) + 28;
+      const pillX = (viewW - pillW) / 2;
+      const pillY = viewH - 108;
+      roundRect(ctx, pillX, pillY, pillW, 30, 8);
+      ctx.fillStyle = 'rgba(10, 14, 24, 0.65)';
+      ctx.fill();
+      ctx.fillStyle = '#ffe14d';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(garageText, viewW / 2, pillY + 16);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic';
+      boxes.garage = { x: pillX, y: pillY, w: pillW, h: 30 };
     }
   } else {
     ctx.fillStyle = '#ffffff';
     ctx.font = '13px "Trebuchet MS", Verdana, sans-serif';
     const weapon = player.weapon === 'pistol' ? 'Pistol ' + player.ammo + '/' + player.reserveAmmo
       : player.weapon === 'shotgun' ? 'Shotgun ' + player.ammo + '/' + player.reserveAmmo : 'Fists';
-    ctx.fillText(weapon + '  •  E: steal car   F: punch   Click: shoot', 18, viewH - 22);
+    const footText = weapon + '  •  E: steal car   F: punch   Click: shoot';
+    ctx.fillText(footText, 18, viewH - 22);
+    boxes.footWeapon = { x: 18, y: viewH - 35, w: Math.ceil(ctx.measureText(footText).width), h: 13 };
   }
 
   // Centre message (mission complete, warnings, busted/wasted handled by screens).
+  boxes.message = null;
   if (game.missions.messageTimer > 0 && game.missions.message) {
     const msg = game.missions.message;
     // A finished job gets a bigger gold card; anything else stays small.
@@ -118,6 +183,7 @@ export function drawHUD(ctx, game, viewW, viewH) {
     ctx.fillStyle = 'rgba(10, 14, 24, 0.78)';
     const cardH = isComplete ? 46 : 34;
     const cardY = viewH - 150 - (isComplete ? 6 : 0);
+    boxes.message = { x: (viewW - w) / 2 - 16, y: cardY, w: w + 32, h: cardH };
     roundRect(ctx, (viewW - w) / 2 - 16, cardY, w + 32, cardH, 6);
     ctx.fill();
     if (isComplete) {
@@ -134,6 +200,7 @@ export function drawHUD(ctx, game, viewW, viewH) {
   }
 
   // Dialogue subtitle: GTA-style lower third — colored speaker name, white line.
+  boxes.subtitle = null;
   if (game.missions.subtitle) {
     const sub = game.missions.subtitle;
     ctx.font = 'bold 15px "Trebuchet MS", Verdana, sans-serif';
@@ -143,6 +210,7 @@ export function drawHUD(ctx, game, viewW, viewH) {
     const barW = nameW + lineW + 36;
     const barX = (viewW - barW) / 2;
     const barY = viewH - 216;
+    boxes.subtitle = { x: barX, y: barY, w: barW, h: 34 };
     ctx.globalAlpha = clamp(sub.timer, 0, 1);
     ctx.fillStyle = 'rgba(8, 10, 18, 0.82)';
     roundRect(ctx, barX, barY, barW, 34, 6);
@@ -158,16 +226,20 @@ export function drawHUD(ctx, game, viewW, viewH) {
   }
 
   // Off-screen objective arrow at the screen edge.
-  drawObjectiveArrow(ctx, game, viewW, viewH);
+  boxes.arrow = drawObjectiveArrow(ctx, game, viewW, viewH, boxes);
 
   // Minimap, bottom-right.
-  drawMinimap(ctx, game, viewW - MINIMAP_W - 14, viewH - MINIMAP_H - 14, MINIMAP_W, MINIMAP_H);
+  const mapX = viewW - MINIMAP_W - 14;
+  const mapY = viewH - MINIMAP_H - 14;
+  boxes.minimap = { x: mapX - 6, y: mapY - 6, w: MINIMAP_W + 12, h: MINIMAP_H + 12 };
+  drawMinimap(ctx, game, mapX, mapY, MINIMAP_W, MINIMAP_H);
 
   // Hurt flash.
   if (player.hurtTimer > 0) {
     ctx.fillStyle = 'rgba(255, 30, 30,' + (player.hurtTimer * 0.55) + ')';
     ctx.fillRect(0, 0, viewW, viewH);
   }
+  game.hudBoxes = boxes;
   ctx.restore();
 }
 
@@ -195,17 +267,33 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-/** An arrow at the screen edge pointing at the current objective. */
-function drawObjectiveArrow(ctx, game, viewW, viewH) {
+/** An arrow at the screen edge pointing at the current objective.
+ * The chevron rides a safe lane (v7 F5): never in the top strip (vitals,
+ * weapon chip, objective banner, radio popup), never over the minimap,
+ * never over the bottom-left drive readout, and never over the garage
+ * pill when it is showing. Returns the box it painted (chevron +
+ * distance label), or null when the objective is on screen. */
+function drawObjectiveArrow(ctx, game, viewW, viewH, boxes) {
   const marker = game.missions.marker();
-  if (!marker) return;
+  if (!marker) return null;
   const cam = game.camera;
   const sx = (marker.x - cam.x) * cam.zoom + viewW / 2;
   const sy = (marker.y - cam.y) * cam.zoom + viewH / 2;
-  const margin = 46;
-  if (sx > margin && sx < viewW - margin && sy > margin && sy < viewH - margin) return;
-  const cx = clamp(sx, margin, viewW - margin);
-  const cy = clamp(sy, margin, viewH - margin);
+  if (sx > 46 && sx < viewW - 46 && sy > 46 && sy < viewH - 46) return null;
+  // Top strip: the lowest top HUD element (packages, y ~106-118) plus
+  // margin; the chevron's own half-height sits above this line.
+  let cx = clamp(sx, 46, viewW - 46);
+  let cy = clamp(sy, 170, viewH - 46);
+  // Minimap (bottom-right): slide left of it when the arrow would land
+  // in its corner.
+  if (cx > viewW - 270 && cy > viewH - 230) cx = viewW - 270;
+  // Bottom-left drive readout: stay above the speed and the car name.
+  if (cx < 300 && cy > viewH - 116) cy = viewH - 116;
+  // Garage pill (centre-bottom, when showing): step left of it.
+  const pill = boxes ? boxes.garage : null;
+  if (pill && cx + 34 > pill.x && cx - 34 < pill.x + pill.w && cy + 44 > pill.y && cy - 34 < pill.y + pill.h) {
+    cx = pill.x - 40;
+  }
   const angle = Math.atan2(sy - viewH / 2, sx - viewW / 2);
   const d = dist(game.player.x, game.player.y, marker.x, marker.y);
   ctx.save();
@@ -225,6 +313,7 @@ function drawObjectiveArrow(ctx, game, viewW, viewH) {
   ctx.textAlign = 'center';
   ctx.fillText(Math.round(d) + 'm', cx, cy + 26);
   ctx.textAlign = 'left';
+  return { x: cx - 34, y: cy - 34, w: 68, h: 78 };
 }
 
 /** The minimap: roads, sea, the player, cars, police and the mission marker. */

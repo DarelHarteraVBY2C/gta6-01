@@ -29,6 +29,7 @@ export class Car {
     this.def = type;
     this.color = o.color || type.color;
     this.speed = 0;
+    this.groundSpeed = 0; // measured displacement per second (v7 F4)
     this.hp = type.hp;
     this.maxHp = type.hp; // raised by garage armor plating
     this.driver = o.driver || null; // 'player' | 'traffic' | 'police' | null (parked)
@@ -132,6 +133,15 @@ export function driveCar(car, input, dt, city, others, speedBonus) {
       }
     }
   }
+  // Ground truth for the speedometer (v7 F4): what the car actually did
+  // this step, after the walls and the traffic had their say. A car
+  // floored against a wall covers no ground, so its needle falls to zero
+  // even while the throttle is down; the value is smoothed so a single
+  // frame of contact does not flicker the readout.
+  const covered = Math.hypot(car.x - ox, car.y - oy);
+  const instant = dt > 0 ? covered / dt : 0;
+  const blend = Math.min(1, dt * 12);
+  car.groundSpeed += (instant - car.groundSpeed) * blend;
   if (car.hp < 40) car.smoke = Math.max(car.smoke, 0.4);
   return hit;
 }

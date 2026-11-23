@@ -117,6 +117,7 @@ export class MissionManager {
     this.messageTimer = 0;
     this.subtitle = null; // GTA dialogue banner {speaker, color, line, timer}
     this.subtitleQueue = []; // lines waiting their turn behind the current one
+    this.bannerQueue = []; // toasts + lines waiting for the single lower banner (v7 F3)
     this.cashPickups = [];
     this.taxi = { state: 'idle', pickup: null, dest: null, timer: 0, fare: 0 };
     this.completedCount = 0;
@@ -157,7 +158,15 @@ export class MissionManager {
     this.onStepStart();
   }
 
+  // One lower banner at a time (v7 F3): a toast never covers Vera's
+  // dialogue, and a line never talks over a toast that is already up.
+  // Whichever channel is busy, the other one waits in bannerQueue and
+  // surfaces when the slot frees up, in the order it was asked for.
   showMessage(text, seconds) {
+    if (this.subtitle) {
+      this.bannerQueue.push({ kind: 'toast', text, seconds });
+      return;
+    }
     this.message = text;
     this.messageTimer = seconds;
   }
@@ -167,14 +176,33 @@ export class MissionManager {
    * the one already showing instead of cutting it off mid-sentence. */
   say(speaker, color, line, seconds) {
     const entry = { speaker, color, line, timer: seconds || 4 };
+    if (this.messageTimer > 0 && this.message) {
+      this.bannerQueue.push({ kind: 'line', entry });
+      return;
+    }
     if (!this.subtitle) this.subtitle = entry;
     else this.subtitleQueue.push(entry);
   }
 
-  /** Drop the current line and anything queued (a fresh staging beat). */
+  /** Drop the current line, anything queued, and any waiting banner
+   * (a fresh staging beat). */
   clearSubtitle() {
     this.subtitle = null;
     this.subtitleQueue.length = 0;
+    this.bannerQueue.length = 0;
+  }
+
+  /** Show the next waiting banner, if the lower slot is free. */
+  promoteQueuedBanner() {
+    if (this.subtitle || (this.messageTimer > 0 && this.message)) return;
+    const next = this.bannerQueue.shift();
+    if (!next) return;
+    if (next.kind === 'toast') {
+      this.message = next.text;
+      this.messageTimer = next.seconds;
+    } else {
+      this.subtitle = next.entry;
+    }
   }
 
   /** One-off setup when a step begins (spawn enemies, the target car, heat). */
@@ -337,12 +365,20 @@ export class MissionManager {
   update(dt) {
     const game = this.game;
     const player = game.player;
-    if (this.messageTimer > 0) this.messageTimer -= dt;
+    if (this.messageTimer > 0) {
+      this.messageTimer -= dt;
+      if (this.messageTimer <= 0) {
+        this.message = '';
+        this.promoteQueuedBanner();
+      }
+    }
     if (this.subtitle) {
       this.subtitle.timer -= dt;
       if (this.subtitle.timer <= 0) {
-        // The next queued line takes the lower third.
+        // The next queued line takes the lower third; with no line
+        // waiting, a queued toast or line takes it instead.
         this.subtitle = this.subtitleQueue.shift() || null;
+        if (!this.subtitle) this.promoteQueuedBanner();
       }
     }
     // Cash bundles.
