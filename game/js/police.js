@@ -16,6 +16,11 @@ export function policeCountFor(level) {
   return [0, 1, 2, 3, 4, 5][clamp(level, 0, 5)];
 }
 
+/** How many SWAT vans join the hunt at each wanted level (on top of cruisers). */
+export function swatCountFor(level) {
+  return level >= 5 ? 2 : level >= 4 ? 1 : 0;
+}
+
 function nearestCoord(value, list) {
   let best = list[0];
   let bd = Math.abs(value - list[0]);
@@ -111,9 +116,25 @@ export class PoliceCar extends Car {
   constructor(x, y, angle) {
     super(x, y, angle, 'police', { driver: 'police' });
     this.ramCooldown = 0;
+    this.ramPower = 6; // damage per ram to the player's car
     this.sirenPhase = Math.random() * Math.PI * 2;
     this.stuckT = 0; // seconds spent barely moving while trying to chase
     this.reverseT = 0; // seconds left of the unstick reverse
+    this.lastX = x;
+    this.lastY = y;
+  }
+}
+
+/** A SWAT van: slower than a cruiser, far tougher (220 hp), and its ram
+ * hits more than twice as hard. The SBPD rolls it out at four stars. */
+export class SwatVan extends Car {
+  constructor(x, y, angle) {
+    super(x, y, angle, 'swat', { driver: 'police' });
+    this.ramCooldown = 0;
+    this.ramPower = 14; // a van shove hurts: 14 hp per ram
+    this.sirenPhase = Math.random() * Math.PI * 2;
+    this.stuckT = 0;
+    this.reverseT = 0;
     this.lastX = x;
     this.lastY = y;
   }
@@ -124,6 +145,13 @@ export function spawnPoliceCar(city, rng, px, py) {
   const p = randomRoadPointFar(rng, px, py, 500);
   const angle = Math.atan2(py - p.y, px - p.x);
   return new PoliceCar(p.x, p.y, angle);
+}
+
+/** Spawn one SWAT van on a road 500-800 px from the player. */
+export function spawnSwatVan(city, rng, px, py) {
+  const p = randomRoadPointFar(rng, px, py, 500);
+  const angle = Math.atan2(py - p.y, px - p.x);
+  return new SwatVan(p.x, p.y, angle);
 }
 
 /**
@@ -187,7 +215,7 @@ export function updatePoliceCar(car, dt, city, allCars, player, rng) {
       player.car.x += ux * shove;
       player.car.y += uy * shove;
       player.car.speed += 120;
-      player.car.hp -= 6;
+      player.car.hp -= car.ramPower || 6; // a SWAT van hits far harder
       car.speed *= 0.6;
       car.ramCooldown = 0.9;
       return 'ram';

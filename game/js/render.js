@@ -4,6 +4,7 @@
 import { clamp, lerp, dist, shade } from './utils.js';
 import { CITY_WIDTH, CITY_HEIGHT, AVENUES, STREETS, ROAD_HALF } from './city.js';
 import { money, clock } from './utils.js';
+import { drawCollectibles } from './collectibles.js';
 
 export const VIEW_W = 1280;
 export const VIEW_H = 720;
@@ -48,6 +49,7 @@ export function drawWorld(ctx, game) {
   drawBuildings(ctx, game);
   drawProps(ctx, game);
   drawMarkers(ctx, game);
+  drawCollectibles(ctx, game);
   drawPeds(ctx, game);
   drawEnemies(ctx, game);
   drawCars(ctx, game);
@@ -59,14 +61,14 @@ export function drawWorld(ctx, game) {
   // Vignette to focus the eye on the middle of the frame.
   const grad = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.42, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.85);
   grad.addColorStop(0, 'rgba(0,0,0,0)');
-  grad.addColorStop(1, 'rgba(20,10,0,0.28)');
+  grad.addColorStop(1, 'rgba(20,10,0,0.34)');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   // Sun glare from the west (top-left) plus a warm golden-hour grade.
   // Screen-space, so it warms the whole frame evenly.
   const glare = ctx.createRadialGradient(0, 0, 0, 0, 0, VIEW_H * 0.95);
-  glare.addColorStop(0, 'rgba(255,205,125,0.20)');
-  glare.addColorStop(0.45, 'rgba(255,185,105,0.06)');
+  glare.addColorStop(0, 'rgba(255,205,125,0.26)');
+  glare.addColorStop(0.45, 'rgba(255,185,105,0.08)');
   glare.addColorStop(1, 'rgba(255,185,105,0)');
   ctx.fillStyle = glare;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
@@ -95,6 +97,20 @@ function drawGround(ctx, game) {
     ctx.lineTo(CITY_WIDTH + 400, wy);
     ctx.stroke();
   }
+  // Sun glints on the water: short bright dashes that drift with the time.
+  ctx.strokeStyle = 'rgba(255,245,200,0.5)';
+  ctx.lineWidth = 3;
+  for (let i = 0; i < 9; i += 1) {
+    const gx = ((i * 397 + Math.floor(game.time * 12)) % 3400) - 100;
+    const gy = city.beach.seaY + 40 + (i * 23) % 140;
+    const glint = 0.25 + Math.sin(game.time * 1.7 + i * 1.3) * 0.2;
+    ctx.globalAlpha = Math.max(0.05, glint);
+    ctx.beginPath();
+    ctx.moveTo(gx, gy);
+    ctx.lineTo(gx + 26, gy);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
   // Park grass and pond.
   ctx.fillStyle = '#4c8a50';
   ctx.fillRect(city.park.x, city.park.y, city.park.w, city.park.h);
@@ -102,6 +118,12 @@ function drawGround(ctx, game) {
   ctx.beginPath();
   ctx.ellipse(city.park.x + 130, city.park.y + 150, 52, 34, 0, 0, Math.PI * 2);
   ctx.fill();
+  // A slow ripple ring on the pond.
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(city.park.x + 130, city.park.y + 150, 30 + Math.sin(game.time * 0.9) * 9, 20 + Math.sin(game.time * 0.9) * 6, 0, 0, Math.PI * 2);
+  ctx.stroke();
   // Roads: dark asphalt with lighter sidewalks.
   for (const a of AVENUES) {
     ctx.fillStyle = '#9c9180';
@@ -186,10 +208,31 @@ function drawBuildings(ctx, game) {
           ctx.fillRect(wx, wy, 11, 13);
         }
       }
-    } else if (b.roof > 0.5) {
+    } else if (b.roof > 0.35) {
+      // Rooftop vents on more roofs: the city reads as lived-in, not flat.
       ctx.fillStyle = '#6b6f78';
       ctx.fillRect(b.x + b.w * 0.3, b.y + b.h * 0.3, 14, 14);
       ctx.fillRect(b.x + b.w * 0.6, b.y + b.h * 0.55, 10, 10);
+      ctx.fillRect(b.x + b.w * 0.55, b.y + b.h * 0.2, 8, 8);
+    }
+    if (b.helipad) {
+      // Air One's rooftop helipad: a marked landing circle on the tower.
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      ctx.strokeStyle = '#ffe14d';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 26, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 26, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 26px "Trebuchet MS", Verdana, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('H', cx, cy + 9);
+      ctx.textAlign = 'left';
     }
   }
   // Neon signs.
@@ -378,43 +421,68 @@ function drawCars(ctx, game) {
     // Shadow.
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.fillRect(-car.length / 2 + 3, -car.width / 2 + 4, car.length, car.width);
-    // Body.
-    ctx.fillStyle = car.color;
-    roundRectPath(ctx, -car.length / 2, -car.width / 2, car.length, car.width, 6);
-    ctx.fill();
-    // Cabin + windshield.
-    ctx.fillStyle = 'rgba(20,30,44,0.85)';
-    roundRectPath(ctx, -car.length * 0.18, -car.width / 2 + 3, car.length * 0.32, car.width - 6, 4);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(160,210,255,0.5)';
-    ctx.fillRect(car.length * 0.14, -car.width / 2 + 4, 5, car.width - 8);
-    // Taxi checker stripe.
-    if (car.type === 'taxi') {
-      ctx.fillStyle = '#111';
-      for (let i = 0; i < 5; i += 1) ctx.fillRect(-car.length / 2 + 6 + i * 8, -2, 5, 4);
-      ctx.fillStyle = '#ffe14d';
-      ctx.font = 'bold 8px Verdana, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('TAXI', 0, -car.width / 2 - 3);
-      ctx.textAlign = 'left';
+    if (car.type === 'bike') {
+      // Motorcycle: two wheels, a slim frame and a rider leaning forward.
+      // No cabin, no windshield — the bike reads as a bike at a glance.
+      ctx.fillStyle = '#161616';
+      ctx.beginPath();
+      ctx.arc(-car.length / 2 + 4, 0, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(car.length / 2 - 4, 0, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = car.color;
+      roundRectPath(ctx, -car.length / 2, -3, car.length, 6, 3);
+      ctx.fill();
+      ctx.fillStyle = '#e8c9a0';
+      ctx.beginPath();
+      ctx.arc(-3, 0, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#23232c';
+      ctx.beginPath();
+      ctx.arc(2, 0, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,244,180,0.9)';
+      ctx.fillRect(car.length / 2 - 2, -2, 3, 4);
+    } else {
+      // Body.
+      ctx.fillStyle = car.color;
+      roundRectPath(ctx, -car.length / 2, -car.width / 2, car.length, car.width, 6);
+      ctx.fill();
+      // Cabin + windshield.
+      ctx.fillStyle = 'rgba(20,30,44,0.85)';
+      roundRectPath(ctx, -car.length * 0.18, -car.width / 2 + 3, car.length * 0.32, car.width - 6, 4);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(160,210,255,0.5)';
+      ctx.fillRect(car.length * 0.14, -car.width / 2 + 4, 5, car.width - 8);
+      // Taxi checker stripe.
+      if (car.type === 'taxi') {
+        ctx.fillStyle = '#111';
+        for (let i = 0; i < 5; i += 1) ctx.fillRect(-car.length / 2 + 6 + i * 8, -2, 5, 4);
+        ctx.fillStyle = '#ffe14d';
+        ctx.font = 'bold 8px Verdana, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('TAXI', 0, -car.width / 2 - 3);
+        ctx.textAlign = 'left';
+      }
+      // Police light bar, flashing red and blue.
+      if (car.type === 'police' || car.type === 'swat') {
+        const phase = Math.floor(car.lightPhase) % 2 === 0;
+        ctx.fillStyle = phase ? '#ff3b30' : '#3b82ff';
+        ctx.fillRect(-8, -car.width / 2 - 2, 8, 5);
+        ctx.fillStyle = phase ? '#3b82ff' : '#ff3b30';
+        ctx.fillRect(0, -car.width / 2 - 2, 8, 5);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 8px Verdana, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(car.type === 'swat' ? 'SWAT' : 'SBPD', 0, car.width / 2 + 9);
+        ctx.textAlign = 'left';
+      }
+      // Headlights.
+      ctx.fillStyle = 'rgba(255,244,180,0.9)';
+      ctx.fillRect(car.length / 2 - 2, -car.width / 2 + 2, 3, 5);
+      ctx.fillRect(car.length / 2 - 2, car.width / 2 - 7, 3, 5);
     }
-    // Police light bar, flashing red and blue.
-    if (car.type === 'police') {
-      const phase = Math.floor(car.lightPhase) % 2 === 0;
-      ctx.fillStyle = phase ? '#ff3b30' : '#3b82ff';
-      ctx.fillRect(-8, -car.width / 2 - 2, 8, 5);
-      ctx.fillStyle = phase ? '#3b82ff' : '#ff3b30';
-      ctx.fillRect(0, -car.width / 2 - 2, 8, 5);
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 8px Verdana, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('SBPD', 0, car.width / 2 + 9);
-      ctx.textAlign = 'left';
-    }
-    // Headlights.
-    ctx.fillStyle = 'rgba(255,244,180,0.9)';
-    ctx.fillRect(car.length / 2 - 2, -car.width / 2 + 2, 3, 5);
-    ctx.fillRect(car.length / 2 - 2, car.width / 2 - 7, 3, 5);
     ctx.restore();
     // Smoke when wrecked.
     if (car.smoke > 0) {
@@ -459,6 +527,17 @@ function drawPlayer(ctx, game) {
     ctx.moveTo(8, 0);
     ctx.lineTo(22, 0);
     ctx.stroke();
+  }
+  if (p.weapon === 'shotgun') {
+    // Long barrel with a wooden pump: the shotgun reads at a glance.
+    ctx.strokeStyle = '#1c1c1c';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(8, 0);
+    ctx.lineTo(30, 0);
+    ctx.stroke();
+    ctx.fillStyle = '#6b4a2a';
+    ctx.fillRect(14, -3, 10, 6);
   }
   if (p.punchTimer > 0) {
     // Extended fist.
@@ -591,7 +670,7 @@ export function drawTitleScreen(ctx, game) {
   ctx.fillText('— SUNSET HUSTLE —', VIEW_W / 2, 238);
   ctx.font = '16px "Trebuchet MS", Verdana, sans-serif';
   ctx.fillStyle = '#ffd9a0';
-  ctx.fillText('An original open-world crime story. Steal cars, dodge the SBPD, run five jobs for Vera.', VIEW_W / 2, 272);
+  ctx.fillText('An original open-world crime story. Steal cars, dodge the SBPD, run eight jobs for Vera.', VIEW_W / 2, 272);
   const buttons = game.menuButtons;
   for (const b of buttons) {
     ctx.fillStyle = b.hover ? '#ffe14d' : 'rgba(255,255,255,0.16)';

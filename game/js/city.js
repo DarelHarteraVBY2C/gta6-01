@@ -27,7 +27,7 @@ const BUILDING_PALETTE = [
   '#c47f6e', '#7e93a8', '#b5a48f', '#94a89a', '#d0b48c', '#8a7f9e',
 ];
 const GLASS_PALETTE = ['#3d5a73', '#2f4a5e', '#4a6b7d', '#35505f'];
-const NEON_SIGNS = ['HOTEL', 'CASINO', 'BAR', 'PIZZA', 'MOTEL', 'CLUB', '24H', 'TACOS', 'GYM', 'PAWN'];
+const NEON_SIGNS = ['HOTEL', 'CASINO', 'BAR', 'PIZZA', 'MOTEL', 'CLUB', '24H', 'TACOS', 'GYM', 'PAWN', 'ARCADE', 'NOODLE', 'DONUT', 'BODEGA', 'KARAOKE'];
 
 /** True when the point is on a drivable road (avenue or street). */
 export function isOnRoad(x, y) {
@@ -83,6 +83,8 @@ export function generateCity(seed) {
   const park = { x: 1520, y: 1120, w: 260, h: 260 };
   // The beach: everything south of y = 2380 is sand, the sea starts at 2520.
   const beach = { y: 2380, seaY: 2520 };
+  // One downtown glass tower gets a rooftop helipad for Air One.
+  let helipadPlaced = false;
 
   // Buildings fill every block between roads, except the park block and the
   // beach strip. A block is split into 1-3 buildings with a small gap.
@@ -115,8 +117,15 @@ export function generateCity(seed) {
           tall: downtown && rng() < 0.5,
           roof: rng(),
         });
+        // The first downtown glass tower gets Air One's rooftop helipad.
+        // (No rng call here: the city layout stays byte-identical to v2.)
+        const placed = buildings[buildings.length - 1];
+        if (!helipadPlaced && placed.tall) {
+          placed.helipad = true;
+          helipadPlaced = true;
+        }
         // A neon sign on some buildings facing the street.
-        if (rng() < 0.22) {
+        if (rng() < 0.32) {
           signs.push({
             x: bx + w / 2, y: by + 4,
             text: pick(rng, NEON_SIGNS),

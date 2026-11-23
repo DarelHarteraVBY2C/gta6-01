@@ -1,4 +1,4 @@
-// Solmar Bay missions: a seven-job story for Danny Cole, plus taxi fares and
+// Solmar Bay missions: an eight-job story for Danny Cole, plus taxi fares and
 // cash bundles scattered around the city. Each mission is a list of steps; the
 // manager tracks the current step, spawns enemies and markers, and pays out.
 import { dist, rand, pick } from './utils.js';
@@ -77,6 +77,16 @@ export const STORY = [
       { type: 'goto', x: 700, y: 2250, r: 70, text: 'Drop 1/3: the Boardwalk Cafe' },
       { type: 'goto', x: 1050, y: 250, r: 70, text: 'Drop 2/3: Old Town' },
       { type: 'goto', x: 2650, y: 650, r: 70, text: 'Drop 3/3: Harbor Port' },
+    ],
+  },
+  {
+    id: 'harbor-heist', name: 'The Harbor Heist', reward: 5000,
+    intro: 'The last job, and the biggest: the Harbor Port vault holds a week of casino cash. Take it all — and the whole SBPD will be waiting.',
+    steps: [
+      { type: 'goto', x: 3200, y: 1850, r: 80, text: 'Go to the Harbor Port vault' },
+      { type: 'kill', count: 6, x: 3200, y: 1850, text: 'Take down the Harbor Crew (0/6)' },
+      { type: 'pickup', x: 3200, y: 1850, r: 70, text: 'Grab the Harbor loot (press E)' },
+      { type: 'escape', x: 250, y: 1450, r: 80, text: 'Escape to the hideout — five stars, Air One overhead' },
     ],
   },
 ];
@@ -180,6 +190,11 @@ export class MissionManager {
       game.player.givePistol(12);
       this.showMessage('Vera gave you a pistol. 12 rounds in the mag.', 4);
     }
+    if (this.missionIndex === 7 && this.stepIndex === 1) {
+      // The heist fight: Vera stashed a shotgun by the vault door.
+      game.player.giveShotgun(12);
+      this.showMessage('Vera stashed a shotgun by the vault. 12 shells — make them count.', 4);
+    }
   }
 
   /** The map point the HUD arrow and minimap should point at, or null. */
@@ -273,6 +288,9 @@ export class MissionManager {
         } else if (this.missionIndex === 6) {
           game.wanted.add(120); // the getaway job: three stars from the docks
           this.showMessage('Package grabbed. Three stars — don\'t stop for anyone.', 4);
+        } else if (this.missionIndex === 7) {
+          game.wanted.add(400); // the heist: five stars the moment the loot moves
+          this.showMessage('Harbor loot grabbed! Five stars — Air One is on you. Run!', 4);
         } else {
           game.wanted.add(25); // the drop is hot
           this.showMessage('Package grabbed. Cops are on to you — move!', 4);

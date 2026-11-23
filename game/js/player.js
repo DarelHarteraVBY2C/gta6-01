@@ -9,6 +9,10 @@ export const PUNCH_RANGE = 46;
 export const PUNCH_DAMAGE = 25;
 export const PISTOL_DAMAGE = 34;
 export const PISTOL_RANGE = 420;
+export const SHOTGUN_PELLETS = 5;
+export const SHOTGUN_DAMAGE = 12;
+export const SHOTGUN_SPREAD = 0.16; // radians between neighbouring pellets
+export const SHOTGUN_COOLDOWN = 0.6;
 
 export class Player {
   constructor(x, y) {
@@ -22,9 +26,12 @@ export class Player {
     this.cash = 150;
     this.engineLevel = 0; // garage tuning: +8% top speed per level (max 3)
     this.armorLevel = 0; // garage plating: +25 max car HP per level (max 3)
-    this.weapon = 'fists'; // 'fists' | 'pistol'
+    this.weapon = 'fists'; // 'fists' | 'pistol' | 'shotgun'
     this.ammo = 0;
     this.reserveAmmo = 0;
+    this.shotPellets = 1; // pellets in the last shot (1 pistol, 5 shotgun)
+    this.shotDamage = PISTOL_DAMAGE; // damage per pellet of the last shot
+    this.shotSpread = 0; // radians between pellets of the last shot
     this.car = null; // the Car he drives, or null on foot
     this.punchTimer = 0; // seconds left in the punch animation
     this.punchHitDone = false;
@@ -69,6 +76,13 @@ export class Player {
     this.reserveAmmo += ammo;
   }
 
+  /** Hand Danny the shotgun: five pellets per blast, six shells per mag. */
+  giveShotgun(shells) {
+    this.weapon = 'shotgun';
+    this.ammo = Math.max(this.ammo, shells);
+    this.reserveAmmo += shells;
+  }
+
   /** Walk or run on foot. `input` is {up, down, left, right, run}. */
   updateOnFoot(input, dt, city) {
     const speed = input.run ? 320 : 205;
@@ -109,14 +123,21 @@ export class Player {
     };
   }
 
-  /** Fire the pistol toward (tx, ty); returns true when a shot went off. */
+  /** Fire the current gun toward (tx, ty); returns true when a shot went
+   * off. The pistol fires one round; the shotgun fires five pellets in a
+   * fan. Sets shotPellets/shotDamage/shotSpread for the game loop, which
+   * spawns the matching bullets. */
   shoot(tx, ty) {
-    if (this.inCar || this.weapon !== 'pistol' || this.ammo <= 0 || this.shootCooldown > 0) return false;
+    if (this.inCar || (this.weapon !== 'pistol' && this.weapon !== 'shotgun') || this.ammo <= 0 || this.shootCooldown > 0) return false;
+    const shotgun = this.weapon === 'shotgun';
     this.ammo -= 1;
-    this.shootCooldown = 0.22;
+    this.shootCooldown = shotgun ? SHOTGUN_COOLDOWN : 0.22;
+    this.shotPellets = shotgun ? SHOTGUN_PELLETS : 1;
+    this.shotDamage = shotgun ? SHOTGUN_DAMAGE : PISTOL_DAMAGE;
+    this.shotSpread = shotgun ? SHOTGUN_SPREAD : 0;
     this.angle = Math.atan2(ty - this.y, tx - this.x);
     if (this.ammo === 0 && this.reserveAmmo > 0) {
-      const reload = Math.min(12, this.reserveAmmo);
+      const reload = Math.min(shotgun ? 6 : 12, this.reserveAmmo);
       this.ammo = reload;
       this.reserveAmmo -= reload;
     }

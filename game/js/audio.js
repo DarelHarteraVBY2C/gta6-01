@@ -130,6 +130,8 @@ export class AudioEngine {
   }
 
   gunshot() { this.noiseBurst(0.14, 900, 0.5); this.blip(160, 50, 0.12, 0.35, 'square'); }
+  /** Shotgun: a deeper, longer boom than the pistol's crack. */
+  shotgun() { this.noiseBurst(0.28, 520, 0.65); this.blip(120, 38, 0.22, 0.45, 'sawtooth'); }
   punch() { this.blip(120, 45, 0.1, 0.4, 'sine'); }
   pickup() { this.blip(660, 660, 0.07, 0.25); setTimeout(() => this.blip(990, 990, 0.09, 0.25), 70); }
   crash() { this.noiseBurst(0.3, 500, 0.55); this.blip(90, 35, 0.25, 0.4, 'sawtooth'); }

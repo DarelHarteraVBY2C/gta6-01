@@ -12,6 +12,8 @@ export const CAR_TYPES = {
   van: { name: 'Harbor Van', color: '#7d8a99', maxSpeed: 330, accel: 300, turn: 2.3, length: 54, width: 24, hp: 130 },
   truck: { name: 'Port Truck', color: '#5a6b4a', maxSpeed: 310, accel: 280, turn: 2.1, length: 60, width: 26, hp: 160 },
   police: { name: 'SBPD Cruiser', color: '#1c2733', maxSpeed: 500, accel: 480, turn: 3.0, length: 48, width: 23, hp: 120 },
+  swat: { name: 'SBPD SWAT Van', color: '#232a33', maxSpeed: 430, accel: 400, turn: 2.4, length: 56, width: 26, hp: 220 },
+  bike: { name: 'Solmar Streak', color: '#e86a2a', maxSpeed: 620, accel: 640, turn: 3.7, length: 34, width: 14, hp: 60 },
 };
 
 const PARKED_COLORS = ['#4a7fb5', '#c94a4a', '#5da24a', '#8a7f9e', '#d8d8d8', '#3b3b3b', '#c96a3b', '#4a9e8f'];
@@ -174,7 +176,7 @@ export function spawnParkedCars(city, rng, count, avoidX, avoidY) {
     if (near) continue;
     const horizontal = isOnRoad(p.x + 40, p.y) && !isOnRoad(p.x, p.y + 40);
     const angle = horizontal ? (rng() < 0.5 ? 0 : Math.PI) : (rng() < 0.5 ? Math.PI / 2 : -Math.PI / 2);
-    const type = pick(rng, ['sedan', 'sedan', 'coupe', 'van', 'taxi', 'sports']);
+    const type = pick(rng, ['sedan', 'sedan', 'coupe', 'van', 'taxi', 'sports', 'bike']);
     const car = new Car(p.x, p.y, angle, type, { color: type === 'taxi' ? CAR_TYPES.taxi.color : pick(rng, PARKED_COLORS), driver: null });
     cars.push(car);
   }

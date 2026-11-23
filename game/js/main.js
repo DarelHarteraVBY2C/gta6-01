@@ -5,11 +5,11 @@
 //
 // The game: an original open-world crime game (GTA-style, no Rockstar
 // assets). Danny Cole, getaway driver in the coastal city Solmar Bay.
-// 7 story missions for Vera (car theft, deliveries, shootouts, a checkpoint
-// street race, a 3-star getaway run, a bank heist); wanted 0-5 stars with
-// police cruisers, roadblocks at 3 stars and the Air One helicopter at
+// 8 story missions for Vera (car theft, deliveries, shootouts, a checkpoint
+// street race, a 3-star getaway run, a bank heist, and the Harbor Heist finale); wanted 0-5 stars with
+// police cruisers, SWAT vans at 4 stars, roadblocks at 3 stars and the Air One helicopter at
 // 5 stars; car theft, traffic, pedestrians, taxi fares, cash bundles,
-// garage engine/armor upgrades, combat (fists + pistol), HUD + minimap,
+// garage engine/armor upgrades, combat (fists + pistol + shotgun), HUD + minimap,
 // save to localStorage, synthesized WebAudio.
 import { mulberry32, rand, clamp, dist } from './utils.js';
 import { generateCity, CITY_WIDTH, CITY_HEIGHT } from './city.js';
@@ -17,8 +17,9 @@ import { AudioEngine } from './audio.js';
 import { Player } from './player.js';
 import { Car, driveCar, spawnParkedCars, steerToward } from './vehicles.js';
 import { spawnTraffic, updateTrafficCar, spawnPeds, updatePed, scarePeds } from './traffic.js';
-import { Wanted, spawnPoliceCar, updatePoliceCar, policeCountFor, nearestPoliceDistance, makeRoadblock, policeWaypoint, HELI_ENABLED, spawnHelicopter, updateHelicopter } from './police.js';
+import { Wanted, spawnPoliceCar, updatePoliceCar, policeCountFor, nearestPoliceDistance, makeRoadblock, policeWaypoint, HELI_ENABLED, spawnHelicopter, updateHelicopter, spawnSwatVan, swatCountFor } from './police.js';
 import { MissionManager, STORY } from './missions.js';
+import { Collectibles, drawCollectibles } from './collectibles.js';
 import { drawHUD } from './hud.js';
 import { Camera, drawWorld, drawTitleScreen, drawPauseScreen, drawEndScreen, VIEW_W, VIEW_H } from './render.js';
 import { stageShot } from './shots.js';
@@ -59,6 +60,9 @@ export class Game {
     this.city = generateCity(CITY_SEED);
     this.player = new Player(START_POS.x, START_POS.y);
     this.cars = spawnParkedCars(this.city, this.rng, 16, START_POS.x, START_POS.y);
+    // A Solmar Streak bike is always parked outside Vera's Garage: the
+    // fastest way across town, for players who find it first.
+    this.cars.push(new Car(860, 700, Math.PI / 2, 'bike', { color: '#e86a2a', driver: null }));
     this.cars.push(...spawnTraffic(this.city, this.rng, 26));
     this.peds = spawnPeds(this.city, this.rng, 44, START_POS.x, START_POS.y);
     this.police = [];
@@ -66,6 +70,7 @@ export class Game {
     this.wanted = new Wanted();
     this.missions = new MissionManager(this);
     this.missions.seedPickups(this.rng);
+    this.collectibles = new Collectibles(); // hidden packages + shell crates
     this.particles = [];
     this.bullets = [];
     this.time = 0;
@@ -102,6 +107,7 @@ export class Game {
       this.player.y = save.playerY;
       this.playTime = save.playTime || 0;
       if (save.weapon === 'pistol') this.player.givePistol(save.ammo || 12);
+      else if (save.weapon === 'shotgun') this.player.giveShotgun(save.ammo || 6);
       this.missions.completedCount = save.completedCount || 0;
       this.state = 'play';
       this.missions.startMission(save.missionIndex || 0);
@@ -282,18 +288,24 @@ export class Game {
     if (this.state !== 'play' || player.inCar) return;
     const target = this.mouseWorld();
     if (!player.shoot(target.x, target.y)) return;
-    this.audio.gunshot();
-    this.fireBullet(player.x, player.y, target.x, target.y, 'player');
+    if (player.weapon === 'shotgun') this.audio.shotgun();
+    else this.audio.gunshot();
+    // One bullet per pellet: the shotgun fans five pellets around the aim.
+    const base = Math.atan2(target.y - player.y, target.x - player.x);
+    for (let i = 0; i < player.shotPellets; i += 1) {
+      const a = base + (i - (player.shotPellets - 1) / 2) * player.shotSpread;
+      this.fireBullet(player.x, player.y, player.x + Math.cos(a) * 100, player.y + Math.sin(a) * 100, 'player', player.shotDamage);
+    }
     scarePeds(this.peds, player.x, player.y, 320);
     if (nearestPoliceDistance(this.police, player.x, player.y) < 700) this.wanted.add(8);
   }
 
-  fireBullet(x, y, tx, ty, from) {
+  fireBullet(x, y, tx, ty, from, dmg) {
     const angle = Math.atan2(ty - y, tx - x) + (from === 'enemy' ? (Math.random() - 0.5) * 0.22 : 0);
     this.bullets.push({
       x: x + Math.cos(angle) * 20, y: y + Math.sin(angle) * 20,
       vx: Math.cos(angle) * BULLET_SPEED, vy: Math.sin(angle) * BULLET_SPEED,
-      life: 0.5, from,
+      life: 0.5, from, dmg: dmg || 34,
     });
   }
 
@@ -435,8 +447,15 @@ export class Game {
 
     // Police: keep the hunt at the wanted level's strength.
     const want = policeCountFor(this.wanted.level);
-    while (this.police.filter((c) => !c.dead).length < want) {
+    while (this.police.filter((c) => !c.dead && c.type !== 'swat').length < want) {
       this.police.push(spawnPoliceCar(this.city, this.rng, player.x, player.y));
+    }
+    // SWAT vans roll out at four stars, on top of the cruisers: one van
+    // at four stars, two at five. They are slower but far tougher, and
+    // their ram hits more than twice as hard as a cruiser's.
+    const wantSwat = swatCountFor(this.wanted.level);
+    while (this.police.filter((c) => !c.dead && c.type === 'swat').length < wantSwat) {
+      this.police.push(spawnSwatVan(this.city, this.rng, player.x, player.y));
     }
     if (this.wanted.level >= 3 && !this.roadblockSpawned) {
       this.roadblockSpawned = true;
@@ -476,6 +495,7 @@ export class Game {
 
     // Missions, enemies, bullets, particles.
     this.missions.update(dt);
+    this.collectibles.update(this);
     this.missions.updateEnemies(dt);
     this.updateBullets(dt);
     this.updateParticles(dt);
@@ -546,7 +566,7 @@ export class Game {
         for (const enemy of this.missions.enemies) {
           if (enemy.dead) continue;
           if (dist(b.x, b.y, enemy.x, enemy.y) < 16) {
-            enemy.hp -= 34;
+            enemy.hp -= b.dmg; // pistol 34, shotgun pellet 12
             this.spawnSparks(b.x, b.y, 5);
             dead = true;
             if (enemy.hp <= 0) {
@@ -573,7 +593,7 @@ export class Game {
           for (const car of [...this.cars, ...this.police]) {
             if (car.dead || car.driver === 'player') continue;
             if (dist(b.x, b.y, car.x, car.y) < 24) {
-              car.hp -= 10;
+              car.hp -= Math.max(1, Math.round(b.dmg * 0.3)); // pistol 10, pellet 4
               this.spawnSparks(b.x, b.y, 4);
               dead = true;
               break;
