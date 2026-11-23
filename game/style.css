@@ -27,3 +27,76 @@ html, body {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* Touch controls (see js/touch.js): the overlay DOM is only ever built on
+   coarse-pointer devices, and the CSS keeps it hidden everywhere else, so
+   desktop — including the dossier screenshot context — never sees it. */
+.touch-overlay {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .touch-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    pointer-events: none;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .touch-stick {
+    position: absolute;
+    left: 24px;
+    bottom: 24px;
+    width: 128px;
+    height: 128px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.10);
+    border: 2px solid rgba(255, 255, 255, 0.25);
+    pointer-events: auto;
+  }
+
+  .touch-knob {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 56px;
+    height: 56px;
+    margin: -28px 0 0 -28px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.35);
+    border: 2px solid rgba(255, 255, 255, 0.55);
+  }
+
+  .touch-buttons {
+    position: absolute;
+    right: 24px;
+    bottom: 24px;
+    pointer-events: auto;
+  }
+
+  .touch-btn {
+    display: block;
+    margin: 10px 0 0 auto;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.5);
+    background: rgba(10, 14, 24, 0.55);
+    color: #fff;
+    font: bold 13px "Trebuchet MS", Verdana, sans-serif;
+  }
+
+  .touch-btn-shoot {
+    width: 84px;
+    height: 84px;
+    background: rgba(200, 40, 40, 0.55);
+  }
+
+  .touch-btn-radio,
+  .touch-btn-enter {
+    width: 60px;
+    height: 60px;
+  }
+}

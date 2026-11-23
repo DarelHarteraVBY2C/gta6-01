@@ -21,6 +21,10 @@ import { Wanted, spawnPoliceCar, updatePoliceCar, policeCountFor, nearestPoliceD
 import { MissionManager, STORY } from './missions.js';
 import { Collectibles, drawCollectibles } from './collectibles.js';
 import { drawHUD } from './hud.js';
+import { Juice, sparkBurst, smokePuff, fireBurst, blastBurst } from './effects.js';
+import { Lighting } from './lighting.js';
+import { Radio } from './radio.js';
+import { TouchControls } from './touch.js';
 import { Camera, drawWorld, drawTitleScreen, drawPauseScreen, drawEndScreen, VIEW_W, VIEW_H } from './render.js';
 import { stageShot } from './shots.js';
 
@@ -34,12 +38,15 @@ export class Game {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.audio = new AudioEngine();
+    this.radio = new Radio(this.audio); // car radio: stations + popup
     this.camera = new Camera();
     this.rng = mulberry32(CITY_SEED);
     this.state = 'title';
     this.time = 0;
     this.playTime = 0;
     this.shake = 0;
+    this.fx = new Juice(); // screen shake, flashes, skidmarks
+    this.lighting = new Lighting(); // golden hour -> neon night, ambient only
     this.particles = [];
     this.bullets = [];
     this.menuButtons = [];
@@ -51,6 +58,8 @@ export class Game {
     this.resetWorld(CITY_SEED);
     this.loadTitleButtons();
     this.bindInput(canvas);
+    // Last: on-screen controls need keys + the input methods to exist.
+    this.touch = new TouchControls(this); // touch devices only, desktop: no DOM
   }
 
   // ---- world setup -------------------------------------------------------
@@ -72,6 +81,9 @@ export class Game {
     this.missions.seedPickups(this.rng);
     this.collectibles = new Collectibles(); // hidden packages + shell crates
     this.particles = [];
+    this.fx.clear();
+    this.lighting.clearPin();
+    this.radio.reset();
     this.bullets = [];
     this.time = 0;
     this.shake = 0;
@@ -206,6 +218,7 @@ export class Game {
     }
     if (key === 'e') this.interactKey();
     if (key === 'f') this.punchKey();
+    if (key === 'r') this.radioKey();
     if (key === ' ') this.tryShoot();
     if (key === 'g') this.garageKey('engine');
     if (key === 'h') this.garageKey('armor');
@@ -250,6 +263,7 @@ export class Game {
     if (this.missions.interact()) return;
     if (player.inCar) {
       player.exitCar();
+      this.radio.exitCar();
       this.audio.uiClick();
       return;
     }
@@ -257,6 +271,7 @@ export class Game {
     if (car) {
       const occupied = car.driver === 'traffic';
       player.enterCar(car);
+      this.radio.enterCar();
       this.audio.uiClick();
       if (occupied) {
         this.wanted.add(25);
@@ -272,6 +287,16 @@ export class Game {
     const player = this.player;
     if (!player.startPunch()) return;
     this.audio.punch();
+  }
+
+  /** R: switch radio station while driving. */
+  radioKey() {
+    if (!this.player.inCar) {
+      this.missions.showMessage('Hop in a car to use the radio.', 2);
+      return;
+    }
+    this.radio.cycle();
+    this.audio.uiClick();
   }
 
   /** World position under the mouse cursor, for aiming. */
@@ -296,6 +321,11 @@ export class Game {
       const a = base + (i - (player.shotPellets - 1) / 2) * player.shotSpread;
       this.fireBullet(player.x, player.y, player.x + Math.cos(a) * 100, player.y + Math.sin(a) * 100, 'player', player.shotDamage);
     }
+    // Muzzle flash at the barrel tip + a proportional jolt: the shotgun
+    // kicks harder than the pistol.
+    const shotgun = player.weapon === 'shotgun';
+    this.fx.muzzle(player.x + Math.cos(base) * 30, player.y + Math.sin(base) * 30, base, shotgun);
+    this.fx.kick(shotgun ? 0.32 : 0.12);
     scarePeds(this.peds, player.x, player.y, 320);
     if (nearestPoliceDistance(this.police, player.x, player.y) < 700) this.wanted.add(8);
   }
@@ -415,15 +445,16 @@ export class Game {
       const car = player.car;
       const speedBonus = 1 + player.engineLevel * 0.08; // garage tuning
       const hit = driveCar(car, input, dt, this.city, allCars, speedBonus);
+      this.fx.trackSkid(car, dt);
       if (hit && Math.abs(car.speed) > 240) {
         this.audio.crash();
-        this.shake = Math.min(1, this.shake + 0.4);
+        this.fx.kick(0.45);
         this.spawnSparks(car.x, car.y, 8);
       }
       player.x = car.x;
       player.y = car.y;
       player.angle = car.angle;
-      if (car.hp <= 0) this.explodeCar(car);
+      this.updateCarDamage(car, dt, true);
     } else {
       player.updateOnFoot(input, dt, this.city);
       this.resolvePunch();
@@ -441,7 +472,7 @@ export class Game {
     // Traffic and pedestrians.
     for (const car of this.cars) {
       if (car.driver === 'traffic') updateTrafficCar(car, dt, this.city, allCars, this.rng);
-      else if (car.hp <= 0 && !car.dead) this.explodeCar(car);
+      if (!car.dead && car.hp < car.maxHp) this.updateCarDamage(car, dt, false);
     }
     for (const ped of this.peds) updatePed(ped, dt, this.city, this.rng);
 
@@ -478,7 +509,7 @@ export class Game {
       const event = updatePoliceCar(car, dt, this.city, allCars, player, this.rng);
       if (event === 'ram') {
         this.audio.crash();
-        this.shake = Math.min(1, this.shake + 0.5);
+        this.fx.kick(0.5);
         this.spawnSparks(player.x, player.y, 10);
       }
       if (event === 'bust') {
@@ -489,7 +520,7 @@ export class Game {
         player.bustedTimer = 0;
         return;
       }
-      if (car.hp <= 0 && !car.dead) this.explodeCar(car);
+      if (!car.dead && car.hp < car.maxHp) this.updateCarDamage(car, dt, false);
     }
     this.wanted.update(dt, policeNear);
 
@@ -499,7 +530,7 @@ export class Game {
     this.missions.updateEnemies(dt);
     this.updateBullets(dt);
     this.updateParticles(dt);
-    if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 1.6);
+    this.shake = this.fx.update(dt);
     if (this.missions.completedCount >= STORY.length && !this.finishedShown) {
       this.finishedShown = true;
       this.state = 'finished';
@@ -515,6 +546,7 @@ export class Game {
     const speedRatio = player.inCar ? Math.abs(player.car.speed) / player.car.def.maxSpeed : 0;
     this.audio.setEngine(speedRatio, player.inCar && input.up);
     this.audio.setSiren(nearestPoliceDistance(this.police, player.x, player.y));
+    this.radio.update(dt);
   }
 
   /** Resolve a punch mid-swing against enemies, pedestrians and cars. */
@@ -614,15 +646,57 @@ export class Game {
     }
   }
 
+  /**
+   * Fair vehicle damage, ticked once per step for any car whose health has
+   * dropped below full: smoke under half health, fire under a quarter, and
+   * once the health hits zero a two-second fuse — flashing plus a beep
+   * every half second — before the car finally goes up. No car dies
+   * instantly, and a wrecked car that shunts a SWAT van just burns fairly.
+   * Healing the car back above zero (garage armor, a repair) cancels the fuse.
+   */
+  updateCarDamage(car, dt, isPlayer) {
+    if (car.dead) return;
+    const ratio = car.hp / car.maxHp;
+    if (ratio < 0.5) {
+      car.smoke = Math.max(car.smoke, 0.4);
+      if (Math.random() < dt * 5) smokePuff(this.particles, car.x, car.y - 6, 1, false);
+    } else {
+      car.smoke = Math.max(0, car.smoke - dt);
+    }
+    if (ratio < 0.25 && Math.random() < dt * 9) fireBurst(this.particles, car.x, car.y - 4, 1);
+    if (car.doomed && car.hp > 0) {
+      car.doomed = false;
+      car.burnFuse = 0;
+    }
+    if (car.hp <= 0 && !car.doomed) {
+      car.doomed = true;
+      car.burnFuse = 2;
+      car.warnTick = 0;
+      this.audio.blip(880, 880, 0.15, 0.3, 'square');
+      if (isPlayer) this.missions.showMessage('Your ride is going up — bail out!', 2);
+    }
+    if (car.doomed) {
+      car.burnFuse -= dt;
+      car.warnTick -= dt;
+      if (car.warnTick <= 0) {
+        car.warnTick = 0.5;
+        this.audio.blip(880, 660, 0.1, 0.25, 'square');
+      }
+      if (car.burnFuse <= 0) this.explodeCar(car);
+    }
+  }
+
   explodeCar(car) {
     if (car.dead) return;
     car.dead = true;
+    car.doomed = false;
     this.audio.explosion();
-    this.shake = 1;
+    this.fx.kick(1);
     this.spawnExplosion(car.x, car.y);
     scarePeds(this.peds, car.x, car.y, 400);
     if (this.player.car === car) {
       this.player.exitCar();
+      this.radio.exitCar();
       this.player.takeDamage(25);
       this.player.x = car.x + 40;
       this.player.y = car.y;
@@ -631,14 +705,7 @@ export class Game {
   }
 
   spawnSparks(x, y, count) {
-    for (let i = 0; i < count; i += 1) {
-      const a = Math.random() * Math.PI * 2;
-      const s = 60 + Math.random() * 140;
-      this.particles.push({
-        x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
-        life: 0.35, maxLife: 0.35, color: '#ffe9a3', size: 2 + Math.random() * 2,
-      });
-    }
+    sparkBurst(this.particles, x, y, count, 170);
   }
 
   // Frozen dust puffs: fixed positions, zero velocity, full life, so they
@@ -656,22 +723,24 @@ export class Game {
   }
 
   spawnExplosion(x, y) {
-    for (let i = 0; i < 26; i += 1) {
-      const a = Math.random() * Math.PI * 2;
-      const s = 40 + Math.random() * 220;
-      this.particles.push({
-        x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
-        life: 0.9, maxLife: 0.9, color: ['#ff9a3d', '#ff5d5d', '#5a5a5a'][i % 3], size: 3 + Math.random() * 5,
-      });
-    }
+    blastBurst(this.particles, x, y);
   }
 
   updateParticles(dt) {
     for (const pt of [...this.particles]) {
       pt.x += pt.vx * dt;
       pt.y += pt.vy * dt;
-      pt.vx *= 0.94;
-      pt.vy *= 0.94;
+      if (pt.kind === 'smoke') {
+        pt.vx *= 0.985;
+        pt.vy = pt.vy * 0.985 - 8 * dt; // smoke climbs and swells
+        pt.size += dt * 7;
+      } else if (pt.kind === 'fire') {
+        pt.vy -= 34 * dt; // flames lick upward
+        pt.vx *= 0.96;
+      } else {
+        pt.vx *= 0.94;
+        pt.vy *= 0.94;
+      }
       pt.life -= dt;
       if (pt.life <= 0) this.particles.splice(this.particles.indexOf(pt), 1);
     }

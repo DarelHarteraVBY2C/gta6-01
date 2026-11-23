@@ -13,7 +13,7 @@ export const CAR_TYPES = {
   truck: { name: 'Port Truck', color: '#5a6b4a', maxSpeed: 310, accel: 280, turn: 2.1, length: 60, width: 26, hp: 160 },
   police: { name: 'SBPD Cruiser', color: '#1c2733', maxSpeed: 500, accel: 480, turn: 3.0, length: 48, width: 23, hp: 120 },
   swat: { name: 'SBPD SWAT Van', color: '#232a33', maxSpeed: 430, accel: 400, turn: 2.4, length: 56, width: 26, hp: 220 },
-  bike: { name: 'Solmar Streak', color: '#e86a2a', maxSpeed: 620, accel: 640, turn: 3.7, length: 34, width: 14, hp: 60 },
+  bike: { name: 'Solmar Streak', color: '#e86a2a', maxSpeed: 620, accel: 780, turn: 4.6, length: 34, width: 14, hp: 60 },
 };
 
 const PARKED_COLORS = ['#4a7fb5', '#c94a4a', '#5da24a', '#8a7f9e', '#d8d8d8', '#3b3b3b', '#c96a3b', '#4a9e8f'];
@@ -34,8 +34,13 @@ export class Car {
     this.driver = o.driver || null; // 'player' | 'traffic' | 'police' | null (parked)
     this.dead = false;
     this.smoke = 0; // seconds of smoke left after a hard hit
+    this.doomed = false; // hp hit zero: burning out, fuse running
+    this.burnFuse = 0; // seconds left before the wreck explodes
+    this.warnTick = 0; // seconds until the next warning beep
     this.collideCooldown = 0; // seconds until this car can take crash damage again
     this.lightPhase = 0;
+    this.lean = 0; // bike lean into the turn, radians (smoothed in driveCar)
+    this.prevAngle = angle; // heading last step, for drift/skid detection
     this.id = Car.nextId;
     Car.nextId += 1;
   }
@@ -72,9 +77,16 @@ export function driveCar(car, input, dt, city, others, speedBonus) {
   }
   car.speed = clamp(car.speed, -170, def.maxSpeed * bonus);
   // Steering bites harder the faster the car goes, and reverses when reversing.
+  // The bike answers the bars sooner: it keeps a bite even at low speed, so
+  // it feels flickable where a car feels planted.
   const speedFactor = clamp(Math.abs(car.speed) / 160, 0, 1);
+  const bite = car.type === 'bike' ? Math.max(speedFactor, 0.38) : speedFactor;
   const steer = (input.left ? -1 : 0) + (input.right ? 1 : 0);
-  car.angle += steer * def.turn * speedFactor * dt * (car.speed < 0 ? -1 : 1);
+  car.angle += steer * def.turn * bite * dt * (car.speed < 0 ? -1 : 1);
+  if (car.type === 'bike') {
+    const targetLean = steer * clamp(Math.abs(car.speed) / 300, 0, 1) * 0.22;
+    car.lean += (targetLean - car.lean) * Math.min(1, dt * 8);
+  }
   const nx = car.x + Math.cos(car.angle) * car.speed * dt;
   const ny = car.y + Math.sin(car.angle) * car.speed * dt;
   const ox = car.x;

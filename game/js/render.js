@@ -35,17 +35,18 @@ export class Camera {
 /** Draw the whole world view (ground, roads, buildings, entities, particles). */
 export function drawWorld(ctx, game) {
   const cam = game.camera;
+  const light = game.lighting.phaseAt(game.time);
   ctx.save();
   ctx.clearRect(0, 0, VIEW_W, VIEW_H);
-  // Warm golden-hour wash over everything.
-  ctx.fillStyle = '#e8b06a';
+  // Sky wash for the current phase: warm gold by day, deep blue at night.
+  ctx.fillStyle = light.wash;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-  const shakeX = game.shake > 0 ? (Math.random() - 0.5) * game.shake * 14 : 0;
-  const shakeY = game.shake > 0 ? (Math.random() - 0.5) * game.shake * 14 : 0;
-  ctx.translate(VIEW_W / 2 + shakeX, VIEW_H / 2 + shakeY);
+  const off = game.fx.offset();
+  ctx.translate(VIEW_W / 2 + off.x, VIEW_H / 2 + off.y);
   ctx.scale(cam.zoom, cam.zoom);
   ctx.translate(-cam.x, -cam.y);
   drawGround(ctx, game);
+  game.fx.drawSkids(ctx);
   drawBuildings(ctx, game);
   drawProps(ctx, game);
   drawMarkers(ctx, game);
@@ -57,21 +58,124 @@ export function drawWorld(ctx, game) {
   drawHeli(ctx, game);
   drawParticles(ctx, game);
   drawBullets(ctx, game);
+  game.fx.drawFlashes(ctx);
   ctx.restore();
+  // Night overlay: the world goes dark, the HUD (drawn later) stays bright.
+  if (light.darkness > 0.01) {
+    ctx.fillStyle = 'rgba(8,12,32,' + (light.darkness * 0.52).toFixed(3) + ')';
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  }
+  // Light layer, drawn through the dark: headlights, siren halos, neon
+  // glow, and Air One's searchlight at full strength.
+  if (light.darkness > 0.3) drawLightLayer(ctx, game, light);
   // Vignette to focus the eye on the middle of the frame.
   const grad = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.42, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.85);
   grad.addColorStop(0, 'rgba(0,0,0,0)');
-  grad.addColorStop(1, 'rgba(20,10,0,0.34)');
+  grad.addColorStop(1, 'rgba(10,8,20,' + light.vignette.toFixed(3) + ')');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-  // Sun glare from the west (top-left) plus a warm golden-hour grade.
-  // Screen-space, so it warms the whole frame evenly.
+  // Sun glare by day, cool moonlight by night — screen-space, so it
+  // grades the whole frame evenly.
   const glare = ctx.createRadialGradient(0, 0, 0, 0, 0, VIEW_H * 0.95);
-  glare.addColorStop(0, 'rgba(255,205,125,0.26)');
-  glare.addColorStop(0.45, 'rgba(255,185,105,0.08)');
-  glare.addColorStop(1, 'rgba(255,185,105,0)');
+  glare.addColorStop(0, light.glareCss(light.glare));
+  glare.addColorStop(0.45, light.glareCss(light.glare * 0.3));
+  glare.addColorStop(1, light.glareCss(0));
   ctx.fillStyle = glare;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+}
+
+/** '#rrggbb' plus an alpha, as an rgba() string. */
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a.toFixed(3) + ')';
+}
+
+/** Night light layer: headlight cones, pulsing siren halos, neon glow, and
+ * a boosted Air One searchlight — drawn in world space after the night
+ * overlay, so the lights cut through the dark. */
+function drawLightLayer(ctx, game, light) {
+  const cam = game.camera;
+  const off = game.fx.offset();
+  ctx.save();
+  ctx.translate(VIEW_W / 2 + off.x, VIEW_H / 2 + off.y);
+  ctx.scale(cam.zoom, cam.zoom);
+  ctx.translate(-cam.x, -cam.y);
+  const dark = light.darkness;
+  // Neon signs glow after dark: a soft halo in each sign's own color.
+  for (const s of game.city.signs) {
+    const g = ctx.createRadialGradient(s.x, s.y + 8, 2, s.x, s.y + 8, 34);
+    g.addColorStop(0, hexA(s.color, 0.34 * dark));
+    g.addColorStop(1, hexA(s.color, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y + 8, 34, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Headlight cones: player + traffic + police, only once it is dark.
+  if (light.headlights) {
+    const cars = [...game.cars, ...game.police];
+    for (const car of cars) {
+      if (car.dead) continue;
+      const len = car.type === 'bike' ? 120 : 170;
+      const spread = 0.42;
+      const fx = car.x + Math.cos(car.angle) * (car.length * 0.5);
+      const fy = car.y + Math.sin(car.angle) * (car.length * 0.5);
+      const tx = fx + Math.cos(car.angle) * len;
+      const ty = fy + Math.sin(car.angle) * len;
+      const px = -Math.sin(car.angle);
+      const py = Math.cos(car.angle);
+      const half = len * spread;
+      const grad = ctx.createLinearGradient(fx, fy, tx, ty);
+      grad.addColorStop(0, 'rgba(255,240,170,0.20)');
+      grad.addColorStop(1, 'rgba(255,240,170,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(fx, fy);
+      ctx.lineTo(tx + px * half, ty + py * half);
+      ctx.lineTo(tx - px * half, ty - py * half);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+  // Siren halos: a pulsing red-blue glow around every cruiser and SWAT van.
+  if (light.siren > 0) {
+    for (const car of game.police) {
+      if (car.dead) continue;
+      const phase = Math.floor(car.lightPhase) % 2 === 0;
+      const col = phase ? '255,59,48' : '59,130,255';
+      const pulse = 0.16 + 0.12 * Math.sin(car.lightPhase * 2);
+      const g = ctx.createRadialGradient(car.x, car.y, 6, car.x, car.y, 78);
+      g.addColorStop(0, 'rgba(' + col + ',' + (pulse * light.siren).toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(' + col + ',0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(car.x, car.y, 78, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  // Air One's searchlight at full strength: a bright cone onto the player
+  // and a hot pool of light where it lands.
+  const heli = game.heli;
+  if (heli && game.wanted.level >= 5) {
+    const p = game.player;
+    const dx = p.x - heli.x;
+    const dy = p.y - heli.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const px = -dy / d;
+    const py = dx / d;
+    ctx.fillStyle = 'rgba(255,240,170,0.30)';
+    ctx.beginPath();
+    ctx.moveTo(heli.x, heli.y);
+    ctx.lineTo(p.x + px * 60, p.y + py * 60);
+    ctx.lineTo(p.x - px * 60, p.y - py * 60);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,240,170,0.34)';
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y, 58, 40, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawGround(ctx, game) {
@@ -423,7 +527,10 @@ function drawCars(ctx, game) {
     ctx.fillRect(-car.length / 2 + 3, -car.width / 2 + 4, car.length, car.width);
     if (car.type === 'bike') {
       // Motorcycle: two wheels, a slim frame and a rider leaning forward.
-      // No cabin, no windshield — the bike reads as a bike at a glance.
+      // The whole bike crabs a touch into the corner (car.lean), and the
+      // rider's head shifts to the inside of the turn — the lean reads
+      // at a glance. No cabin, no windshield.
+      ctx.rotate(car.lean || 0);
       ctx.fillStyle = '#161616';
       ctx.beginPath();
       ctx.arc(-car.length / 2 + 4, 0, 6, 0, Math.PI * 2);
@@ -436,7 +543,7 @@ function drawCars(ctx, game) {
       ctx.fill();
       ctx.fillStyle = '#e8c9a0';
       ctx.beginPath();
-      ctx.arc(-3, 0, 5, 0, Math.PI * 2);
+      ctx.arc(-3, (car.lean || 0) * 22, 5, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#23232c';
       ctx.beginPath();
@@ -490,6 +597,13 @@ function drawCars(ctx, game) {
       ctx.beginPath();
       ctx.arc(car.x + (Math.random() - 0.5) * 20, car.y + (Math.random() - 0.5) * 20 - 8, 8 + Math.random() * 8, 0, Math.PI * 2);
       ctx.fill();
+    }
+    // A doomed car flashes red in its final two seconds: the warning
+    // before it goes up.
+    if (car.doomed && Math.floor(game.time * 8) % 2 === 0) {
+      ctx.strokeStyle = 'rgba(255,59,48,0.9)';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(car.x - car.length / 2 - 4, car.y - car.width / 2 - 4, car.length + 8, car.width + 8);
     }
   }
 }
@@ -626,7 +740,26 @@ function drawHeli(ctx, game) {
 function drawParticles(ctx, game) {
   for (const pt of game.particles) {
     const a = clamp(pt.life / pt.maxLife, 0, 1);
-    ctx.globalAlpha = a;
+    ctx.globalAlpha = pt.kind === 'smoke' ? a * 0.7 : a;
+    if (pt.kind === 'spark') {
+      // Streaks along the velocity: sparks read as flying metal.
+      ctx.strokeStyle = pt.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(pt.x, pt.y);
+      ctx.lineTo(pt.x - pt.vx * 0.03, pt.y - pt.vy * 0.03);
+      ctx.stroke();
+      continue;
+    }
+    if (pt.kind === 'fire') {
+      // Flickering flame: the size wobbles as it burns out.
+      const wob = 1 + Math.sin(pt.life * 40) * 0.25;
+      ctx.fillStyle = pt.color;
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, pt.size * wob * (0.5 + a * 0.5), 0, Math.PI * 2);
+      ctx.fill();
+      continue;
+    }
     ctx.fillStyle = pt.color;
     ctx.beginPath();
     ctx.arc(pt.x, pt.y, pt.size * (0.5 + a * 0.5), 0, Math.PI * 2);

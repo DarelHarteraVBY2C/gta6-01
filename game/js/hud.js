@@ -67,6 +67,22 @@ export function drawHUD(ctx, game, viewW, viewH) {
   ctx.fillText(tracker, viewW / 2, 58);
   ctx.textAlign = 'left';
 
+  // Radio popup: the station card, briefly, under the mission tracker.
+  if (game.radio.popup) {
+    const pop = game.radio.popup;
+    ctx.font = 'bold 14px "Trebuchet MS", Verdana, sans-serif';
+    const w = ctx.measureText(pop.text).width;
+    ctx.globalAlpha = clamp(pop.timer, 0, 1);
+    ctx.fillStyle = 'rgba(10, 14, 24, 0.78)';
+    roundRect(ctx, (viewW - w) / 2 - 14, 66, w + 28, 28, 6);
+    ctx.fill();
+    ctx.fillStyle = '#4de3ff';
+    ctx.textAlign = 'center';
+    ctx.fillText(pop.text, viewW / 2, 85);
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
+
   // Bottom-left: speed and vehicle, or weapon on foot.
   ctx.font = 'bold 22px "Trebuchet MS", Verdana, sans-serif';
   ctx.fillStyle = '#ffffff';
@@ -114,6 +130,30 @@ export function drawHUD(ctx, game, viewW, viewH) {
     ctx.textAlign = 'center';
     ctx.fillText(msg, viewW / 2, cardY + (isComplete ? 31 : 23));
     ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
+
+  // Dialogue subtitle: GTA-style lower third — colored speaker name, white line.
+  if (game.missions.subtitle) {
+    const sub = game.missions.subtitle;
+    ctx.font = 'bold 15px "Trebuchet MS", Verdana, sans-serif';
+    const nameW = ctx.measureText(sub.speaker + '  ').width;
+    ctx.font = '17px "Trebuchet MS", Verdana, sans-serif';
+    const lineW = ctx.measureText(sub.line).width;
+    const barW = nameW + lineW + 36;
+    const barX = (viewW - barW) / 2;
+    const barY = viewH - 216;
+    ctx.globalAlpha = clamp(sub.timer, 0, 1);
+    ctx.fillStyle = 'rgba(8, 10, 18, 0.82)';
+    roundRect(ctx, barX, barY, barW, 34, 6);
+    ctx.fill();
+    ctx.fillStyle = sub.color;
+    ctx.font = 'bold 15px "Trebuchet MS", Verdana, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(sub.speaker, barX + 14, barY + 22);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '17px "Trebuchet MS", Verdana, sans-serif';
+    ctx.fillText(sub.line, barX + 14 + nameW, barY + 22);
     ctx.globalAlpha = 1;
   }
 

@@ -69,10 +69,12 @@ export function stageShot(name, game) {
 }
 
 /** Cover: the M8 Harbor Heist escape — five stars, Air One overhead, a
- * SWAT van in the mix, the loot in hand, the hideout ahead. */
+ * SWAT van in the mix, the loot in hand, the hideout ahead. Pinned to
+ * neon night: the searchlight cone and the siren glow are the cover. */
 function stageHeist(game) {
   game.resetWorld(20261119);
   game.startFreePlay();
+  game.lighting.pin('night');
   game.missions.startMission(7); // The Harbor Heist: the finale
   game.missions.stepIndex = 3; // the escape step
   game.missions.onStepStart();
@@ -85,15 +87,19 @@ function stageHeist(game) {
   placePolice(game, 3380, 1820);
   placeSwat(game, 2750, 2050);
   playForward(game, 4, () => ({ up: true, down: false, left: false, right: false, run: false }));
-  // Stage the car pristine: a smoking wreck reads as a lost escape, and
-  // the cover should show the finale at its best (a fresh car mid-flight).
-  if (game.player.car) {
-    game.player.car.hp = game.player.car.def.hp;
-    game.player.car.smoke = 0;
-  }
+  // No magic repair here anymore: the fair damage system (smoke, fire,
+  // two-second fuse) means a chase can scuff the car without killing it
+  // outright, so the frame shows a real escape, not a reset one.
+  // (Deleted v3 hack: `if (game.player.car) { hp = def.hp; smoke = 0; }` —
+  // it crashed with a TypeError once the car had exploded and player.car
+  // was null. The fair fuse replaces it.)
   // Clear any pickup toast so the cover shows only the mission banner.
   game.missions.message = '';
   game.missions.messageTimer = 0;
+  // The escape line, fresh for the frame: the subtitle timer ran down
+  // during the staged drive, so say it again for the shot.
+  game.missions.clearSubtitle();
+  game.missions.say('VERA', '#ff9a3d', "Lose the heli and you're home.", 6);
   // Frozen dust puffs behind the player's car: the frame reads as motion.
   const rearX = game.player.x - Math.cos(game.player.angle) * 42;
   const rearY = game.player.y - Math.sin(game.player.angle) * 42;
@@ -117,10 +123,8 @@ function stageChase(game) {
   placePolice(game, 320, 1420);
   placePolice(game, 1050, 1050);
   playForward(game, 4, () => ({ up: true, down: false, left: false, right: false, run: false }));
-  // Stage the car pristine: a smoking wreck reads as a lost chase, and
-  // the cover should show the pursuit at its best (a fresh car mid-chase).
-  game.player.car.hp = game.player.car.def.hp;
-  game.player.car.smoke = 0;
+  // No magic repair here anymore (deleted v3 hack, same as the heist
+  // cover): the fair damage system carries the chase instead.
   // Clear any pickup toast so the cover shows only the mission banner.
   game.missions.message = '';
   game.missions.messageTimer = 0;
@@ -213,14 +217,16 @@ function stageRace(game) {
 }
 
 /** Street Heat on the Solmar Streak: the bike threads dense downtown
- * traffic through the race gates — the fastest ride in the game. */
+ * traffic through the race gates — the fastest ride in the game.
+ * v6: the beach at golden hour instead — sand, sea glints, low sun. */
 function stageBike(game) {
   game.resetWorld(20261119);
   game.startFreePlay();
+  game.lighting.pin('golden');
   game.missions.startMission(5); // Street Heat
   game.missions.stepIndex = 1; // the race step (gates + 60s clock)
   game.missions.onStepStart();
-  putPlayerInCar(game, 'bike', 1500, 650, 0, 300);
+  putPlayerInCar(game, 'bike', 1200, 2455, 0, 300);
   playForward(game, 2.5, () => ({ up: true, down: false, left: false, right: false, run: false }));
   // Frozen dust puffs behind the bike: the frame reads as speed.
   const rearX = game.player.x - Math.cos(game.player.angle) * 42;
@@ -230,10 +236,12 @@ function stageBike(game) {
 }
 
 /** On foot at the docks with the shotgun: a five-pellet blast frozen
- * mid-flight at the nearest Harbor Crew member. */
+ * mid-flight at the nearest Harbor Crew member. Pinned to dusk: the
+ * muzzle flash and sparks read brightest against the fading light. */
 function stageShotgun(game) {
   game.resetWorld(20261119);
   game.startFreePlay();
+  game.lighting.pin('dusk');
   game.missions.startMission(7); // The Harbor Heist
   game.missions.stepIndex = 1; // the kill step: 6 crew + shotgun granted
   game.missions.onStepStart();
@@ -270,10 +278,12 @@ function stageShotgun(game) {
   return { screen: 'play' };
 }
 
-/** Four stars: a SWAT van and a roadblock ahead, cruisers behind. */
+/** Four stars: a SWAT van and a roadblock ahead, cruisers behind.
+ * Pinned to neon night: the red-blue siren glow is the shot. */
 function stageSwat(game) {
   game.resetWorld(20261119);
   game.startFreePlay();
+  game.lighting.pin('night');
   game.missions.startMission(1); // The Drop: the delivery run
   game.missions.stepIndex = 2;
   game.missions.onStepStart();
@@ -288,21 +298,33 @@ function stageSwat(game) {
   const block = game.makeRoadblock(Math.PI);
   game.police.push(...block);
   playForward(game, 2.8, () => ({ up: true, down: false, left: false, right: false, run: false }));
-  // Stage the car pristine: it ploughs into the blockade, and the shot
-  // should show the chase at its best, not a wreck.
-  if (game.player.car) {
-    game.player.car.hp = game.player.car.def.hp;
-    game.player.car.smoke = 0;
-  }
+  // No magic repair here anymore (deleted v3 hack, same as the heist
+  // cover): the fair damage system carries the chase instead.
+  // Clear any pickup toast (the drive can collect a hidden package) so
+  // the frame shows the blockade, not a reward popup.
+  game.missions.message = '';
+  game.missions.messageTimer = 0;
   // Frame the SWAT van: the chase piles it into the roadblock, where it
   // reads as just another cruiser. Park it clear ahead of the player,
   // nose-to-nose with the getaway car, so the 4-star threat is visible.
   const van = game.police.find((p) => p.type === 'swat');
   if (van && game.player.car) {
-    van.x = game.player.x - 280;
-    van.y = game.player.y - 60;
+    van.x = game.player.x - 300;
+    van.y = game.player.y - 10;
     van.angle = Math.atan2(game.player.y - van.y, game.player.x - van.x);
     van.speed = 0;
+    // Declutter: push every other police car at least 220px off the van,
+    // so at night the SWAT van reads as its own vehicle under its siren
+    // glow instead of drowning in a pileup.
+    for (const other of game.police) {
+      if (other === van || other.dead) continue;
+      const d = Math.hypot(other.x - van.x, other.y - van.y);
+      if (d < 220) {
+        const push = 220 - d;
+        other.x += ((other.x - van.x) / (d || 1)) * push;
+        other.y += ((other.y - van.y) / (d || 1)) * push;
+      }
+    }
   }
   return { screen: 'play' };
 }

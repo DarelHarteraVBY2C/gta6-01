@@ -90,6 +90,48 @@ export class AudioEngine {
     this.sirenOsc.frequency.setTargetAtTime(tone, t, 0.05);
   }
 
+  /** Stop the sunset-drive music loop (the radio takes over from here). */
+  stopMusic() {
+    if (this.musicTimer) { clearInterval(this.musicTimer); this.musicTimer = null; }
+  }
+
+  /** Schedule one oscillator note at an exact time (for the radio). */
+  tone(freq, when, dur, type, gainValue) {
+    if (!this.ctx) return;
+    const osc = this.ctx.createOscillator();
+    osc.type = type || 'sine';
+    osc.frequency.value = freq;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, when);
+    gain.gain.exponentialRampToValueAtTime(gainValue, when + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.001, when + dur);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(when);
+    osc.stop(when + dur + 0.02);
+  }
+
+  /** Schedule a short filtered noise burst at an exact time (scanner static). */
+  noiseAt(when, duration, filterFreq, gainValue) {
+    if (!this.ctx) return;
+    const len = Math.max(1, Math.floor(this.ctx.sampleRate * duration));
+    const buffer = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < len; i += 1) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = filterFreq;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(gainValue, when);
+    gain.gain.exponentialRampToValueAtTime(0.001, when + duration);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.master);
+    src.start(when);
+  }
+
   /** Short burst of filtered noise. */
   noiseBurst(duration, filterFreq, gainValue) {
     if (!this.ctx) return;

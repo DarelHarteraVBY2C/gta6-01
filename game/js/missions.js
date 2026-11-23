@@ -115,6 +115,8 @@ export class MissionManager {
     this.targetCar = null; // the Falco GT for Hot Wheels
     this.message = '';
     this.messageTimer = 0;
+    this.subtitle = null; // GTA dialogue banner {speaker, color, line, timer}
+    this.subtitleQueue = []; // lines waiting their turn behind the current one
     this.cashPickups = [];
     this.taxi = { state: 'idle', pickup: null, dest: null, timer: 0, fare: 0 };
     this.completedCount = 0;
@@ -160,6 +162,21 @@ export class MissionManager {
     this.messageTimer = seconds;
   }
 
+  /** GTA-style dialogue banner: a colored speaker name + a white line,
+   * shown as a lower third for a few seconds. A new line queues behind
+   * the one already showing instead of cutting it off mid-sentence. */
+  say(speaker, color, line, seconds) {
+    const entry = { speaker, color, line, timer: seconds || 4 };
+    if (!this.subtitle) this.subtitle = entry;
+    else this.subtitleQueue.push(entry);
+  }
+
+  /** Drop the current line and anything queued (a fresh staging beat). */
+  clearSubtitle() {
+    this.subtitle = null;
+    this.subtitleQueue.length = 0;
+  }
+
   /** One-off setup when a step begins (spawn enemies, the target car, heat). */
   onStepStart() {
     const step = this.step;
@@ -194,6 +211,17 @@ export class MissionManager {
       // The heist fight: Vera stashed a shotgun by the vault door.
       game.player.giveShotgun(12);
       this.showMessage('Vera stashed a shotgun by the vault. 12 shells — make them count.', 4);
+    }
+    if (this.missionIndex === 7 && this.stepIndex === 0) {
+      // The heist briefing: Vera sets the job up in her own words.
+      this.say('VERA', '#ff9a3d', "The Harbor Crew won't hand it over. Take it.", 5);
+    }
+    if (this.missionIndex === 7 && this.stepIndex === 1) {
+      this.say('VERA', '#ff9a3d', 'Six crew between you and the vault. Make it quick.', 5);
+    }
+    if (this.missionIndex === 7 && this.stepIndex === 3) {
+      // The escape: five stars, Air One overhead, one way home.
+      this.say('VERA', '#ff9a3d', "Lose the heli and you're home.", 5);
     }
   }
 
@@ -291,6 +319,7 @@ export class MissionManager {
         } else if (this.missionIndex === 7) {
           game.wanted.add(400); // the heist: five stars the moment the loot moves
           this.showMessage('Harbor loot grabbed! Five stars — Air One is on you. Run!', 4);
+          this.say('VERA', '#ff9a3d', "Loot's yours — five stars on you. Run!", 5);
         } else {
           game.wanted.add(25); // the drop is hot
           this.showMessage('Package grabbed. Cops are on to you — move!', 4);
@@ -309,6 +338,13 @@ export class MissionManager {
     const game = this.game;
     const player = game.player;
     if (this.messageTimer > 0) this.messageTimer -= dt;
+    if (this.subtitle) {
+      this.subtitle.timer -= dt;
+      if (this.subtitle.timer <= 0) {
+        // The next queued line takes the lower third.
+        this.subtitle = this.subtitleQueue.shift() || null;
+      }
+    }
     // Cash bundles.
     for (const bundle of this.cashPickups) {
       if (bundle.taken) continue;
